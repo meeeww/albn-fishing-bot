@@ -4,6 +4,7 @@
     "pixel-coor-test": "node ./scripts/pixel-coor-test.js"
   },
   "dependencies": {
+    "buffercursor": "^0.0.12",
     "cap": "^0.2.1",
     "color-classifier": "^0.0.1",
     "readline-sync": "^1.4.10",

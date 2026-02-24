@@ -2,6 +2,7 @@ const robot = require('robotjs');
 const { sleep } = require('./utils');
 
 let throwChargeTime = 50;
+let isPulling = false; // Track pull state to avoid spamming OS inputs
 
 class FishingActions {
     static async throwBait(x, y) {
@@ -10,7 +11,7 @@ class FishingActions {
         // const chargeTime = Math.floor(Math.random() * (maxChargeTime - minChargeTime + 1) + minChargeTime)
         const chargeTime = throwChargeTime
         console.log('action: throwBait - ', chargeTime)
-        robot.moveMouse(x , y);
+        robot.moveMouse(x, y);
         robot.mouseToggle("down");
         await sleep(chargeTime)
         robot.mouseToggle("up")
@@ -23,15 +24,21 @@ class FishingActions {
     }
 
     static pull(x, y) {
-        console.log('action: pull')
-        robot.moveMouse(x , y);
-        robot.mouseToggle("down");
+        if (!isPulling) {
+            console.log('action: pull')
+            robot.moveMouse(x, y);
+            robot.mouseToggle("down");
+            isPulling = true;
+        }
     }
 
     static rest(x, y) {
-        console.log('action: rest')
-        robot.moveMouse(x , y);
-        robot.mouseToggle("up");
+        if (isPulling) {
+            console.log('action: rest')
+            robot.moveMouse(x, y);
+            robot.mouseToggle("up");
+            isPulling = false;
+        }
     }
 
     static cancel() {

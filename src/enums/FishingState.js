@@ -7,6 +7,7 @@ const FishingState = {
     WIN: 9,
     LOST: 10,
     GET_AWAY: 14,
+    CANCEL: 15,
 }
 
 module.exports = {

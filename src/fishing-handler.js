@@ -72,9 +72,13 @@ class FishingHandler {
         const fishingState = parameters[3];
 
         if (!fishingState) return;
-        if (parameters[1] != this.fishingId) return;
+        // Ignore fishingId mismatch to properly handle events, lock to playerId
+        // if (parameters[1] != this.fishingId) return;
 
-        this.playerId = parameters[0];
+        if (this.playerId && parameters[0] !== this.playerId) return;
+        if (!this.playerId) {
+            this.playerId = parameters[0];
+        }
 
         switch (fishingState) {
             case FishingState.HOOKED:
@@ -113,7 +117,7 @@ class FishingHandler {
                 default:
                     break;
             }
-        }, 50)
+        }, 20)
         this.autoRestart.reboundTimeout()
     }
 
