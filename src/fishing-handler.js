@@ -1,6 +1,5 @@
 const { FishingState } = require("./enums/FishingState");
 const { FishingActions } = require("./fishing-actions");
-const { getReelAction } = require("./pixels");
 const { FishBuffs } = require("./enums/FishBuffs")
 const { sleep } = require("./utils");
 const { Items } = require("./enums/Items");
@@ -143,8 +142,6 @@ class FishingHandler {
         this.reelError = false
         this.reelPace = 1
         this.reelBumps = {}
-        this.reelHeld = false
-        this.sameRead = 0
         this.windowInstance.setForeground()
         FishingActions.hook(this.throwPoint[0], this.throwPoint[1])
         await this.playReel(token)
@@ -160,7 +157,7 @@ class FishingHandler {
         if (this.reelBumps[key]) return
         this.reelBumps[key] = true
         this.reelPace = Math.min(3, (this.reelPace || 1) + 1)
-        console.log(`Faster fish. Watching the bar more often (${this.reelPace}).`)
+        console.log(`Faster fish. Shorter releases (${this.reelPace}).`)
     }
 
     reelAlive(token) {
@@ -168,50 +165,30 @@ class FishingHandler {
     }
 
     async playReel(token) {
-        await sleep(40 + Math.floor(Math.random() * 40))
+        const between = (min, max) => min + Math.floor(Math.random() * (max - min + 1))
+        const pause = async (ms, cutShortOnPace) => {
+            const paceAtStart = this.reelPace || 1
+            let left = ms
+            while (left > 0) {
+                if (!this.reelAlive(token)) return false
+                if (cutShortOnPace && (this.reelPace || 1) > paceAtStart) return true
+                const slice = Math.min(30, left)
+                await sleep(slice)
+                left -= slice
+            }
+            return true
+        }
+
+        await pause(between(40, 90), false)
         while (this.reelAlive(token)) {
             const pace = this.reelPace || 1
-            let seen = { bar: false }
-            try {
-                seen = getReelAction() || seen
-            } catch (error) {
-                if (!this.reelError) {
-                    this.reelError = true
-                    console.log('Reel scan failed:', error.message)
-                }
-            }
+            const hold = pace >= 3 ? between(320, 520) : pace >= 2 ? between(400, 680) : between(520, 900)
+            const rest = pace >= 3 ? between(40, 70) : pace >= 2 ? between(55, 90) : between(80, 130)
 
-            if (seen.bar && !this.sawBar) {
-                this.sawBar = true
-                console.log('Steering the bobber.')
-            }
-
-            const x = this.throwPoint[0]
-            const y = this.throwPoint[1]
-            const action = seen.bar ? seen.action : 'nudge'
-            if (action === 'pull') {
-                this.sameRead = 0
-                this.reelHeld = true
-                FishingActions.pull(x, y)
-            } else if (action === 'rest') {
-                this.sameRead = 0
-                this.reelHeld = false
-                FishingActions.rest(x, y)
-            } else if (!this.reelHeld) {
-                this.reelHeld = true
-                FishingActions.pull(x, y)
-            } else {
-                this.sameRead += 1
-                const stuck = pace >= 2 ? 3 : 6
-                if (this.sameRead > stuck) {
-                    this.reelHeld = false
-                    this.sameRead = 0
-                    FishingActions.rest(x, y)
-                }
-            }
-
-            const gap = pace >= 3 ? 22 : pace >= 2 ? 32 : 48
-            await sleep(gap + Math.floor(Math.random() * 10))
+            FishingActions.pull(this.throwPoint[0], this.throwPoint[1])
+            if (!await pause(hold, false)) return
+            FishingActions.rest(this.throwPoint[0], this.throwPoint[1])
+            if (!await pause(rest, true)) return
         }
     }
 
@@ -302,7 +279,7 @@ class FishingHandler {
         if (this.phase === 'cooldown' || this.phase === 'casting') return;
 
         const age = Date.now() - (this.landedAt || 0)
-        if (this.phase === 'in-water' && age < 3000) {
+        if (reason !== 'cancelled' && this.phase === 'in-water' && age < 3000) {
             const text = `Ignored an early finish ${age}ms after the cast (${reason}). Still waiting for a bite.`
             console.log(text)
             this.onNote?.(text)
