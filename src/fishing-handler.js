@@ -97,6 +97,7 @@ class FishingHandler {
         switch (fishingState) {
             case FishingState.THROW:
             case FishingState.TOUCH_WATER:
+                this.lineConfirmed = true
                 this.phase = 'in-water'
                 break;
             case FishingState.HOOKED:
@@ -134,13 +135,14 @@ class FishingHandler {
             return;
         }
 
+        this.reelToken = (this.reelToken || 0) + 1
+        const token = this.reelToken
         this.phase = 'minigame'
         this.reeling = true
         this.sawBar = false
+        this.reelError = false
         this.windowInstance.setForeground()
-        await FishingActions.hook(this.throwPoint[0], this.throwPoint[1])
-        await sleep(400)
-        if (!this.isEnabled || !this.reeling) return
+        FishingActions.hook(this.throwPoint[0], this.throwPoint[1])
 
         const rect = this.windowInstance.getDimensions()
         const winWidth = rect.right - rect.left
@@ -152,14 +154,19 @@ class FishingHandler {
             height: winHeight * 0.24,
         }
         let missedScans = 0
+        let clicks = 1
 
         this.loopInterval = setInterval(() => {
+            if (this.reelToken !== token) return
             try {
                 const seen = getReelAction(region)
                 if (!seen?.bar) {
                     missedScans += 1
-                    if (missedScans === 20) {
-                        console.log('Reel bar is not visible. The green zone has to be on screen.')
+                    if (missedScans % 12 === 0 && clicks < 4) {
+                        clicks += 1
+                        console.log('Reel bar is not open. Clicking again.')
+                        this.windowInstance.setForeground()
+                        FishingActions.hook(this.throwPoint[0], this.throwPoint[1])
                     }
                     return
                 }
@@ -181,29 +188,55 @@ class FishingHandler {
                 }
             } catch (error) {
                 if (this.reelError) return
-                this.reelError = error.message
+                this.reelError = true
                 console.log('Reel scan failed:', error.message)
             }
-        }, 40)
+        }, 50)
         this.autoRestart.reboundTimeout()
     }
 
     stopPulling(firedByUser = false) {
         clearInterval(this.loopInterval)
+        this.reelToken = (this.reelToken || 0) + 1
+        this.reeling = false
         if (firedByUser) return;
         FishingActions.rest(this.throwPoint[0], this.throwPoint[1])
     }
 
-    async castOnce() {
+    async castOnce(attempt = 0) {
         if (!this.isEnabled) return;
-        if (this.phase === 'casting' || this.phase === 'in-water' || this.phase === 'minigame') return;
+        if (attempt === 0 && (this.phase === 'casting' || this.phase === 'in-water' || this.phase === 'minigame')) return;
+        if (attempt > 2) {
+            console.log('Could not get a line in the water.')
+            this.phase = 'idle'
+            return
+        }
 
         this.phase = 'casting'
+        this.lineConfirmed = false
+        this.sessionId = undefined
+        this.reeling = false
         this.windowInstance.setForeground();
         await FishingActions.throwBait(this.throwPoint[0], this.throwPoint[1])
         if (!this.isEnabled) return;
-        this.sessionId = undefined
-        this.reeling = false
+
+        const started = Date.now()
+        while (!this.lineConfirmed && Date.now() - started < 4000) {
+            await sleep(200)
+            if (!this.isEnabled) return
+        }
+
+        if (!this.lineConfirmed) {
+            console.log('Cast did not land. Retrieving the hook, then trying again.')
+            this.windowInstance.setForeground()
+            FishingActions.retrieve(this.throwPoint[0], this.throwPoint[1])
+            await sleep(1500)
+            if (!this.isEnabled) return
+            this.phase = 'idle'
+            await this.castOnce(attempt + 1)
+            return
+        }
+
         this.phase = 'in-water'
         this.landedAt = Date.now()
         console.log('Waiting for a bite.')
@@ -215,11 +248,14 @@ class FishingHandler {
         if (this.phase === 'casting' || this.phase === 'minigame' || this.phase === 'cooldown') return;
 
         if (this.phase === 'in-water') {
-            console.log('No bite. Cancelling the line, then recasting.')
+            console.log('No bite. Cancelling the line, then retrieving the hook.')
             this.stopPulling()
             FishingActions.cancel()
+            await sleep(600)
+            this.windowInstance.setForeground()
+            FishingActions.retrieve(this.throwPoint[0], this.throwPoint[1])
             this.phase = 'cooldown'
-            await sleep(2500)
+            await sleep(2000)
             if (!this.isEnabled) return;
             this.phase = 'idle'
         }
@@ -245,10 +281,12 @@ class FishingHandler {
         this.phase = 'cooldown'
         try {
             this.stopPulling()
-            const text = `Round finished (${reason}). Next cast in a moment.`
+            const text = `Round finished (${reason}). Retrieving the hook.`
             console.log(text)
             this.onNote?.(text)
-            await sleep(4000)
+            this.windowInstance.setForeground()
+            FishingActions.retrieve(this.throwPoint[0], this.throwPoint[1])
+            await sleep(2000)
             if (!this.isEnabled) return;
             await this.processQueue.executeAllSequential()
             this.phase = 'idle'

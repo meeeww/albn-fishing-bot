@@ -49,7 +49,8 @@ let nextId = 1
 let showAll = false
 const markers = []
 let nextMarkerId = 1
-let lastMarker = null
+let lastCast = null
+let inputsOnCast = 0
 
 const BITE_RESULTS = {
     5: 'bite',
@@ -57,6 +58,17 @@ const BITE_RESULTS = {
     10: 'lost',
     14: 'got away',
     15: 'cancelled',
+}
+
+const INPUT_NAMES = {
+    21: 'move',
+    316: 'bait landed',
+    318: 'line confirmed',
+    319: 'hook',
+    320: 'pull',
+    321: 'rest',
+    322: 'finish',
+    323: 'collect',
 }
 
 function plain(value, depth = 0) {
@@ -115,32 +127,77 @@ function pushRadar(marker) {
     for (const client of clients) client.write(payload)
 }
 
+function findSpot(parameters) {
+    for (const value of Object.values(parameters)) {
+        const spot = coordinatePair(value)
+        if (spot) return spot
+    }
+    return null
+}
+
+function addMarker(marker) {
+    markers.push(marker)
+    if (markers.length > 400) markers.shift()
+    pushRadar(marker)
+}
+
 function trackRadar(kind, message) {
     const parameters = message?.parameters || {}
     const code = Number(codeOf(kind, message))
 
     if (kind === 'request' && code === 22) {
-        const spot = coordinatePair(parameters[3]) || coordinatePair(parameters[1])
+        const spot = findSpot(parameters)
         if (!spot) return
         const marker = {
             id: nextMarkerId++,
             t: Date.now(),
             x: spot[0],
             y: spot[1],
+            kind: 'cast',
             result: 'cast',
+            label: 'cast',
         }
-        markers.push(marker)
-        if (markers.length > 200) markers.shift()
-        lastMarker = marker
-        pushRadar(marker)
+        inputsOnCast = 0
+        lastCast = marker
+        addMarker(marker)
         return
     }
 
-    if (kind !== 'event' || code !== 355 || !lastMarker) return
+    if (kind === 'request' && INPUT_NAMES[code]) {
+        const ownSpot = findSpot(parameters)
+        if (!ownSpot && !lastCast) return
+        if (code === 21 && !ownSpot) return
+        const x = ownSpot ? ownSpot[0] : lastCast.x
+        const y = ownSpot ? ownSpot[1] : lastCast.y
+        let plotX = x
+        let plotY = y
+        if (!ownSpot) {
+            const angle = inputsOnCast * 0.85
+            const radius = 2.5 + (inputsOnCast % 6) * 1.4
+            plotX += Math.cos(angle) * radius
+            plotY += Math.sin(angle) * radius
+            inputsOnCast += 1
+        }
+        addMarker({
+            id: nextMarkerId++,
+            t: Date.now(),
+            x,
+            y,
+            plotX,
+            plotY,
+            kind: 'input',
+            result: INPUT_NAMES[code],
+            label: INPUT_NAMES[code],
+        })
+        return
+    }
+
+    if (kind !== 'event' || code !== 355 || !lastCast) return
     const result = BITE_RESULTS[Number(parameters[3])]
-    if (!result || lastMarker.result === 'caught' || lastMarker.result === result) return
-    lastMarker.result = result
-    pushRadar(lastMarker)
+    if (!result || lastCast.result === 'caught' || lastCast.result === result) return
+    lastCast.result = result
+    lastCast.label = result
+    pushRadar(lastCast)
 }
 
 function recordMessage(kind, message) {
@@ -242,7 +299,8 @@ function startInspector() {
 
         if (req.method === 'POST' && url.pathname === '/api/radar/clear') {
             markers.length = 0
-            lastMarker = null
+            lastCast = null
+            inputsOnCast = 0
             res.writeHead(204)
             res.end()
             return
@@ -432,20 +490,29 @@ const RADAR_PAGE = `<!doctype html>
   p, a { color: #b7b09d; }
   a { color: #e2c56a; }
   button { background: #1d2118; color: inherit; border: 1px solid #3a4030; border-radius: 6px; padding: 6px 10px; }
+  button.active { border-color: #e2c56a; color: #e2c56a; }
+  .controls { display: flex; gap: 8px; }
   main { display: grid; grid-template-columns: 640px 1fr; gap: 16px; padding: 0 20px 24px; }
   canvas { background: #1a1e16; border: 1px solid #2e3426; border-radius: 10px; width: 640px; height: 640px; }
   aside { background: #1a1e16; border: 1px solid #2e3426; border-radius: 10px; padding: 12px 14px; max-height: 640px; overflow: auto; }
   li { margin: 6px 0; font-variant-numeric: tabular-nums; }
+  .cast, .bite, .caught, .lost, .away, .cancelled { }
   .cast { color: #8f8874; } .bite { color: #e2c56a; } .caught { color: #7dcea0; } .lost, .away, .cancelled { color: #d36b6b; }
+  .input { color: #7eb6ff; }
 </style>
 </head>
 <body>
 <header>
   <div>
     <h1>Bite radar</h1>
-    <p>Each dot is a cast. It turns gold on a bite and green when the fish is caught. <a href="/">Packet map</a></p>
+    <p>Casts are circles. Inputs — hook, pull, rest, and the other actions you send — are blue squares. <a href="/">Packet map</a></p>
   </div>
-  <button id="clear" type="button">Clear</button>
+  <div class="controls">
+    <button type="button" data-filter="both" class="active">Both</button>
+    <button type="button" data-filter="cast">Casts</button>
+    <button type="button" data-filter="input">Inputs</button>
+    <button id="clear" type="button">Clear</button>
+  </div>
 </header>
 <main>
   <canvas id="map" width="640" height="640"></canvas>
@@ -459,6 +526,12 @@ const canvas = document.getElementById('map')
 const ctx = canvas.getContext('2d')
 const list = document.getElementById('list')
 const colors = { cast: '#8f8874', bite: '#e2c56a', caught: '#7dcea0', lost: '#d36b6b', 'got away': '#d36b6b', cancelled: '#d36b6b' }
+let filter = 'both'
+
+function shown() {
+  if (filter === 'both') return markers
+  return markers.filter((marker) => marker.kind === filter)
+}
 
 function upsert(marker) {
   const index = markers.findIndex((item) => item.id === marker.id)
@@ -475,20 +548,23 @@ function draw() {
   ctx.arc(320, 320, 220, 0, Math.PI * 2)
   ctx.stroke()
 
-  if (!markers.length) {
+  const visible = shown()
+  if (!visible.length) {
     ctx.fillStyle = '#b7b09d'
     ctx.font = '14px sans-serif'
-    ctx.fillText('No casts yet. Throw the line.', 32, 48)
+    ctx.fillText(markers.length ? 'Nothing in this filter.' : 'No casts yet. Throw the line.', 32, 48)
     list.innerHTML = ''
     return
   }
 
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
-  for (const marker of markers) {
-    minX = Math.min(minX, marker.x)
-    maxX = Math.max(maxX, marker.x)
-    minY = Math.min(minY, marker.y)
-    maxY = Math.max(maxY, marker.y)
+  for (const marker of visible) {
+    const mx = marker.plotX ?? marker.x
+    const my = marker.plotY ?? marker.y
+    minX = Math.min(minX, mx)
+    maxX = Math.max(maxX, mx)
+    minY = Math.min(minY, my)
+    maxY = Math.max(maxY, my)
   }
   const span = Math.max(maxX - minX, maxY - minY, 20)
   const scale = 520 / span
@@ -496,24 +572,38 @@ function draw() {
   const midY = (minY + maxY) / 2
 
   list.innerHTML = ''
-  markers.forEach((marker, index) => {
-    const px = 320 + (marker.x - midX) * scale
-    const py = 320 - (marker.y - midY) * scale
+  visible.forEach((marker, index) => {
+    const px = 320 + ((marker.plotX ?? marker.x) - midX) * scale
+    const py = 320 - ((marker.plotY ?? marker.y) - midY) * scale
+    const color = marker.kind === 'input' ? '#7eb6ff' : (colors[marker.result] || '#e7e1d1')
     ctx.beginPath()
-    ctx.fillStyle = colors[marker.result] || '#e7e1d1'
-    ctx.arc(px, py, marker.result === 'cast' ? 5 : 8, 0, Math.PI * 2)
-    ctx.fill()
-    if (index === markers.length - 1) {
+    ctx.fillStyle = color
+    if (marker.kind === 'input') {
+      ctx.fillRect(px - 5, py - 5, 10, 10)
+    } else {
+      ctx.arc(px, py, marker.result === 'cast' ? 5 : 8, 0, Math.PI * 2)
+      ctx.fill()
+    }
+    if (index === visible.length - 1) {
       ctx.strokeStyle = '#e7e1d1'
       ctx.stroke()
     }
     const item = document.createElement('li')
-    item.className = marker.result === 'got away' ? 'away' : marker.result
+    item.className = marker.kind === 'input' ? 'input' : (marker.result === 'got away' ? 'away' : marker.result)
     const time = new Date(marker.t).toLocaleTimeString(undefined, { hour12: false })
-    item.textContent = time + '  ' + marker.result + '  ' + marker.x.toFixed(1) + ', ' + marker.y.toFixed(1)
+    item.textContent = time + '  ' + (marker.label || marker.result) + '  ' + marker.x.toFixed(1) + ', ' + marker.y.toFixed(1)
     list.appendChild(item)
   })
 }
+
+document.querySelectorAll('[data-filter]').forEach((button) => {
+  button.onclick = () => {
+    filter = button.dataset.filter
+    document.querySelectorAll('[data-filter]').forEach((item) => item.classList.remove('active'))
+    button.classList.add('active')
+    draw()
+  }
+})
 
 document.getElementById('clear').onclick = async () => {
   await fetch('/api/radar/clear', { method: 'POST' })

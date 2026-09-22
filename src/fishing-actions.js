@@ -6,35 +6,42 @@ const CAST_HOLD_MS = 800
 let isPulling = false
 
 class FishingActions {
-    static async throwBait(x, y) {
-        console.log('action: throwBait')
-        if (isPulling) {
-            robot.mouseToggle("up")
-            isPulling = false
-        }
-        robot.moveMouse(x, y);
-        robot.mouseToggle("down");
-        await sleep(CAST_HOLD_MS)
-        robot.mouseToggle("up")
+    static release() {
+        if (!isPulling) return
+        robot.mouseToggle("up", "left")
+        isPulling = false
     }
 
-    static async hook(x, y) {
-        console.log('action: hook')
-        if (isPulling) {
-            robot.mouseToggle("up")
-            isPulling = false
-        }
+    static clickAt(x, y) {
+        this.release()
         robot.moveMouse(Math.round(x), Math.round(y))
-        robot.mouseToggle("down")
-        await sleep(80)
-        robot.mouseToggle("up")
+        robot.mouseClick("left")
+    }
+
+    static async throwBait(x, y) {
+        console.log('action: throwBait')
+        this.release()
+        robot.moveMouse(Math.round(x), Math.round(y));
+        robot.mouseToggle("down", "left");
+        await sleep(CAST_HOLD_MS)
+        robot.mouseToggle("up", "left")
+    }
+
+    static hook(x, y) {
+        console.log('action: hook')
+        this.clickAt(x, y)
+    }
+
+    static retrieve(x, y) {
+        console.log('action: retrieve')
+        this.clickAt(x, y)
     }
 
     static pull(x, y) {
         if (!isPulling) {
             console.log('action: pull')
             robot.moveMouse(Math.round(x), Math.round(y));
-            robot.mouseToggle("down");
+            robot.mouseToggle("down", "left");
             isPulling = true;
         }
     }
@@ -43,7 +50,7 @@ class FishingActions {
         if (isPulling) {
             console.log('action: rest')
             robot.moveMouse(Math.round(x), Math.round(y));
-            robot.mouseToggle("up");
+            robot.mouseToggle("up", "left");
             isPulling = false;
         }
     }

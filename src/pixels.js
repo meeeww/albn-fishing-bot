@@ -36,6 +36,41 @@ const isMarker = (red, green, blue) => {
 
 // Hold moves the bobber right. Release lets it drift left.
 // Keep the bright marker inside the green zone on the reel bar.
+const clampToDisplay = (x, y, width, height) => {
+    let displays = []
+    try {
+        displays = robot.getDisplays() || []
+    } catch {
+        displays = []
+    }
+    if (!displays.length) {
+        const screen = robot.getScreenSize()
+        displays = [{ x: 0, y: 0, width: screen.width, height: screen.height }]
+    }
+
+    const centerX = x + (width / 2)
+    const centerY = y + (height / 2)
+    const display = displays.find((item) => (
+        centerX >= item.x && centerY >= item.y
+        && centerX < item.x + item.width
+        && centerY < item.y + item.height
+    )) || displays[0]
+
+    const left = Math.max(x, display.x)
+    const top = Math.max(y, display.y)
+    const right = Math.min(x + width, display.x + display.width)
+    const bottom = Math.min(y + height, display.y + display.height)
+    const clampedWidth = Math.round(right - left)
+    const clampedHeight = Math.round(bottom - top)
+    if (clampedWidth < 8 || clampedHeight < 8) return null
+    return {
+        x: Math.round(left),
+        y: Math.round(top),
+        width: clampedWidth,
+        height: clampedHeight,
+    }
+}
+
 const getReelAction = (region) => {
     const x = whole(region.x)
     const y = whole(region.y)
@@ -43,16 +78,26 @@ const getReelAction = (region) => {
     const height = whole(region.height)
     if (x === null || y === null || !width || !height) return
 
-    const img = robot.screen.capture(x, y, width, height)
-    if (!img?.image) return
+    const clamped = clampToDisplay(x, y, width, height)
+    if (!clamped) return { bar: false }
+
+    let img
+    try {
+        img = robot.screen.capture(clamped.x, clamped.y, clamped.width, clamped.height)
+    } catch {
+        return { bar: false }
+    }
+    if (!img?.image) return { bar: false }
+    const scanWidth = Math.min(clamped.width, img.width || clamped.width)
+    const scanHeight = Math.min(clamped.height, img.height || clamped.height)
 
     let best = null
-    for (let row = 0; row < height; row += 2) {
+    for (let row = 0; row < scanHeight; row += 2) {
         let run = 0
         let runStart = 0
         let longest = 0
         let longestStart = 0
-        for (let col = 0; col < width; col += 2) {
+        for (let col = 0; col < scanWidth; col += 2) {
             const [red, green, blue] = readPixel(img, col, row)
             if (isGreen(red, green, blue)) {
                 if (run === 0) runStart = col
@@ -78,9 +123,9 @@ const getReelAction = (region) => {
 
     const markerXs = []
     const top = Math.max(0, best.row - 10)
-    const bottom = Math.min(height - 1, best.row + 10)
+    const bottom = Math.min(scanHeight - 1, best.row + 10)
     for (let row = top; row <= bottom; row++) {
-        for (let col = 0; col < width; col++) {
+        for (let col = 0; col < scanWidth; col++) {
             const [red, green, blue] = readPixel(img, col, row)
             if (isMarker(red, green, blue)) markerXs.push(col)
         }
