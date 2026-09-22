@@ -1,5 +1,6 @@
 const { FishingState } = require("./enums/FishingState");
 const { FishingActions } = require("./fishing-actions");
+const { getReelAction } = require("./pixels");
 const { FishBuffs } = require("./enums/FishBuffs")
 const { sleep } = require("./utils");
 const { Items } = require("./enums/Items");
@@ -157,7 +158,7 @@ class FishingHandler {
         if (this.reelBumps[key]) return
         this.reelBumps[key] = true
         this.reelPace = Math.min(3, (this.reelPace || 1) + 1)
-        console.log(`Fish pulling away. Shorter releases (${this.reelPace}).`)
+        console.log(`Faster fish. Watching the bar more often (${this.reelPace}).`)
     }
 
     reelAlive(token) {
@@ -165,30 +166,37 @@ class FishingHandler {
     }
 
     async playReel(token) {
-        const between = (min, max) => min + Math.floor(Math.random() * (max - min + 1))
-        const pause = async (ms, cutShortOnPace) => {
-            const paceAtStart = this.reelPace || 1
-            let left = ms
-            while (left > 0) {
-                if (!this.reelAlive(token)) return false
-                if (cutShortOnPace && (this.reelPace || 1) > paceAtStart) return true
-                const slice = Math.min(30, left)
-                await sleep(slice)
-                left -= slice
-            }
-            return true
-        }
-
-        await pause(between(40, 90), false)
+        await sleep(40 + Math.floor(Math.random() * 40))
+        let nudgePull = true
         while (this.reelAlive(token)) {
             const pace = this.reelPace || 1
-            const hold = pace >= 3 ? between(320, 540) : pace >= 2 ? between(400, 700) : between(540, 960)
-            const rest = pace >= 3 ? between(35, 70) : pace >= 2 ? between(50, 95) : between(85, 145)
+            let seen = { bar: false }
+            try {
+                seen = getReelAction() || seen
+            } catch (error) {
+                if (!this.reelError) {
+                    this.reelError = true
+                    console.log('Reel scan failed:', error.message)
+                }
+            }
 
-            FishingActions.pull(this.throwPoint[0], this.throwPoint[1])
-            if (!await pause(hold, false)) return
-            FishingActions.rest(this.throwPoint[0], this.throwPoint[1])
-            if (!await pause(rest, true)) return
+            if (seen.bar && !this.sawBar) {
+                this.sawBar = true
+                console.log('Steering the bobber.')
+            }
+
+            if (seen.bar && seen.action === 'pull') {
+                FishingActions.pull(this.throwPoint[0], this.throwPoint[1])
+            } else if (seen.bar && seen.action === 'rest') {
+                FishingActions.rest(this.throwPoint[0], this.throwPoint[1])
+            } else if (seen.bar && seen.action === 'nudge') {
+                if (nudgePull) FishingActions.pull(this.throwPoint[0], this.throwPoint[1])
+                else FishingActions.rest(this.throwPoint[0], this.throwPoint[1])
+                nudgePull = !nudgePull
+            }
+
+            const gap = pace >= 3 ? 22 : pace >= 2 ? 32 : 48
+            await sleep(gap + Math.floor(Math.random() * 10))
         }
     }
 
@@ -224,10 +232,7 @@ class FishingHandler {
         }
 
         if (!this.lineConfirmed) {
-            console.log('Cast did not land. Retrieving the hook, then trying again.')
-            this.windowInstance.setForeground()
-            FishingActions.retrieve(this.throwPoint[0], this.throwPoint[1])
-            await sleep(1500)
+            console.log('Cast did not land. Throwing again.')
             if (!this.isEnabled) return
             this.phase = 'idle'
             await this.castOnce(attempt + 1)
@@ -249,15 +254,30 @@ class FishingHandler {
             this.stopPulling()
             FishingActions.cancel()
             await sleep(600)
-            this.windowInstance.setForeground()
-            FishingActions.retrieve(this.throwPoint[0], this.throwPoint[1])
-            this.phase = 'cooldown'
-            await sleep(2000)
-            if (!this.isEnabled) return;
-            this.phase = 'idle'
+            if (!this.isEnabled) return
+            const castByClick = await this.collectOrCast()
+            if (castByClick) return
         }
 
         await this.castOnce()
+    }
+
+    async collectOrCast() {
+        this.lineConfirmed = false
+        this.windowInstance.setForeground()
+        FishingActions.retrieve(this.throwPoint[0], this.throwPoint[1])
+        const started = Date.now()
+        while (!this.lineConfirmed && Date.now() - started < 1200) {
+            await sleep(100)
+            if (!this.isEnabled) return true
+        }
+        if (!this.lineConfirmed) return false
+
+        this.phase = 'in-water'
+        this.landedAt = Date.now()
+        console.log('Waiting for a bite.')
+        this.autoRestart.reboundTimeout()
+        return true
     }
 
     restart = async (playerId, reason = 'unspecified') => {
@@ -281,10 +301,8 @@ class FishingHandler {
             const text = `Round finished (${reason}). Retrieving the hook.`
             console.log(text)
             this.onNote?.(text)
-            this.windowInstance.setForeground()
-            FishingActions.retrieve(this.throwPoint[0], this.throwPoint[1])
-            await sleep(2000)
-            if (!this.isEnabled) return;
+            const castByClick = await this.collectOrCast()
+            if (!this.isEnabled || castByClick) return
             await this.processQueue.executeAllSequential()
             this.phase = 'idle'
             await this.castOnce()

@@ -147,11 +147,29 @@ const getReelAction = () => {
 
     if (!best || !img) return { bar: false }
 
+    const neighbor = best.row + 3 < scanHeight ? best.row + 3 : Math.max(0, best.row - 3)
+    let overlap = 0
+    let run = 0
+    for (let col = 0; col < scanWidth; col += 2) {
+        const [red, green, blue] = readPixel(img, col, neighbor)
+        const inside = col >= best.start && col <= best.start + best.length
+        if (inside && isGreen(red, green, blue)) {
+            if (run === 0) run = 2
+            else run += 2
+            if (run > overlap) overlap = run
+        } else {
+            run = 0
+        }
+    }
+    if (overlap < 24) return { bar: false }
+
     const counts = new Array(scanWidth).fill(0)
-    const top = Math.max(0, best.row - 8)
-    const bottom = Math.min(scanHeight - 1, best.row + 8)
-    for (let row = top; row <= bottom; row++) {
-        for (let col = 0; col < scanWidth; col++) {
+    const top = Math.max(0, best.row - 16)
+    const bottom = Math.min(scanHeight - 1, best.row + 16)
+    const from = Math.max(0, best.start - 120)
+    const to = Math.min(scanWidth - 1, best.start + best.length + 120)
+    for (let row = top; row <= bottom; row += 2) {
+        for (let col = from; col <= to; col++) {
             const [red, green, blue] = readPixel(img, col, row)
             if (isBobber(red, green, blue)) counts[col] += 1
         }
@@ -161,14 +179,13 @@ const getReelAction = () => {
     let runStart = -1
     const closeRun = (runEnd) => {
         const width = runEnd - runStart
-        if (width < 2 || width > 24) return
+        if (width < 2 || width > 18) return
         let score = 0
         for (let col = runStart; col <= runEnd; col++) score += counts[col]
-        if (!peak || score > peak.score) {
-            peak = { x: runStart + (width / 2), score }
-        }
+        if (score < 4) return
+        if (!peak || score > peak.score) peak = { x: runStart + (width / 2), score }
     }
-    for (let col = 0; col < scanWidth; col++) {
+    for (let col = from; col <= to; col++) {
         if (counts[col] > 0) {
             if (runStart < 0) runStart = col
         } else if (runStart >= 0) {
@@ -176,16 +193,14 @@ const getReelAction = () => {
             runStart = -1
         }
     }
-    if (runStart >= 0) closeRun(scanWidth - 1)
-
-    // Mouse up lets the bobber slide left, out of the green, and the fish is lost.
-    // Always hold or release. A missing bobber still has to be steered.
-    if (!peak) {
-        return { bar: true, action: Date.now() % 560 < 300 ? 'pull' : 'rest' }
-    }
+    if (runStart >= 0) closeRun(to)
 
     const zoneCenter = best.start + (best.length / 2)
-    return { bar: true, action: peak.x < zoneCenter ? 'pull' : 'rest' }
+    const slack = Math.max(6, best.length * 0.12)
+    if (!peak) return { bar: true, action: 'nudge' }
+    if (peak.x < zoneCenter - slack) return { bar: true, action: 'pull' }
+    if (peak.x > zoneCenter + slack) return { bar: true, action: 'rest' }
+    return { bar: true, action: 'hold' }
 }
 
 const getActionFromCoordinates = (pullPoint, restPoint) => {
