@@ -5,9 +5,9 @@ const readlineSync = require('readline-sync');
 
 const FILTER = 'udp and (dst port 5056 or src port 5056)';
 
-const initListener = () => {
+const initListener = (options = {}) => {
     const listener = new PhotonParser();
-    const adapterIp = getAdapterIp()
+    const adapterIp = getAdapterIp(options)
     const device = deviceForIp(adapterIp)
 
     if (!device) {
@@ -37,7 +37,7 @@ const initListener = () => {
     return listener
 }
 
-const getAdapterIp = () => {
+const getAdapterIp = (options = {}) => {
     const interfaces = networkInterfaces()
 
     console.log()
@@ -63,12 +63,12 @@ const getAdapterIp = () => {
     if (!selectedIp) {
         console.log()
         console.log('invalid input, try again')
-        return getAdapterIp()
+        return getAdapterIp(options)
     }
 
     console.log()
     console.log(`you have selected "${selectedName}"`)
-    console.log('Listening. Cast the line; the bot starts when the bait hits the water.')
+    console.log(options.readyMessage || 'Listening. Cast the line; the bot starts when the bait hits the water.')
     console.log()
 
     return selectedIp

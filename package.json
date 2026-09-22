@@ -1,6 +1,7 @@
 {
   "scripts": {
     "start": "node app.js",
+    "packets": "node ./scripts/read-packets.js",
     "pixel-coor-test": "node ./scripts/pixel-coor-test.js"
   },
   "dependencies": {
