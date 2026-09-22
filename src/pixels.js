@@ -196,7 +196,7 @@ const getReelAction = () => {
     if (runStart >= 0) closeRun(to)
 
     const zoneCenter = best.start + (best.length / 2)
-    const slack = Math.max(6, best.length * 0.12)
+    const slack = Math.max(4, best.length * 0.08)
     if (!peak) return { bar: true, action: 'nudge' }
     if (peak.x < zoneCenter - slack) return { bar: true, action: 'pull' }
     if (peak.x > zoneCenter + slack) return { bar: true, action: 'rest' }

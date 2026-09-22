@@ -143,6 +143,8 @@ class FishingHandler {
         this.reelError = false
         this.reelPace = 1
         this.reelBumps = {}
+        this.reelHeld = false
+        this.sameRead = 0
         this.windowInstance.setForeground()
         FishingActions.hook(this.throwPoint[0], this.throwPoint[1])
         await this.playReel(token)
@@ -167,7 +169,6 @@ class FishingHandler {
 
     async playReel(token) {
         await sleep(40 + Math.floor(Math.random() * 40))
-        let nudgePull = true
         while (this.reelAlive(token)) {
             const pace = this.reelPace || 1
             let seen = { bar: false }
@@ -185,14 +186,28 @@ class FishingHandler {
                 console.log('Steering the bobber.')
             }
 
-            if (seen.bar && seen.action === 'pull') {
-                FishingActions.pull(this.throwPoint[0], this.throwPoint[1])
-            } else if (seen.bar && seen.action === 'rest') {
-                FishingActions.rest(this.throwPoint[0], this.throwPoint[1])
-            } else if (seen.bar && seen.action === 'nudge') {
-                if (nudgePull) FishingActions.pull(this.throwPoint[0], this.throwPoint[1])
-                else FishingActions.rest(this.throwPoint[0], this.throwPoint[1])
-                nudgePull = !nudgePull
+            const x = this.throwPoint[0]
+            const y = this.throwPoint[1]
+            const action = seen.bar ? seen.action : 'nudge'
+            if (action === 'pull') {
+                this.sameRead = 0
+                this.reelHeld = true
+                FishingActions.pull(x, y)
+            } else if (action === 'rest') {
+                this.sameRead = 0
+                this.reelHeld = false
+                FishingActions.rest(x, y)
+            } else if (!this.reelHeld) {
+                this.reelHeld = true
+                FishingActions.pull(x, y)
+            } else {
+                this.sameRead += 1
+                const stuck = pace >= 2 ? 3 : 6
+                if (this.sameRead > stuck) {
+                    this.reelHeld = false
+                    this.sameRead = 0
+                    FishingActions.rest(x, y)
+                }
             }
 
             const gap = pace >= 3 ? 22 : pace >= 2 ? 32 : 48
