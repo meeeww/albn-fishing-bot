@@ -144,22 +144,13 @@ class FishingHandler {
         this.windowInstance.setForeground()
         FishingActions.hook(this.throwPoint[0], this.throwPoint[1])
 
-        const rect = this.windowInstance.getDimensions()
-        const winWidth = rect.right - rect.left
-        const winHeight = rect.bottom - rect.top
-        const region = {
-            x: rect.left + (winWidth * 0.2),
-            y: rect.top + (winHeight * 0.38),
-            width: winWidth * 0.6,
-            height: winHeight * 0.24,
-        }
         let missedScans = 0
         let clicks = 1
 
         this.loopInterval = setInterval(() => {
             if (this.reelToken !== token) return
             try {
-                const seen = getReelAction(region)
+                const seen = getReelAction()
                 if (!seen?.bar) {
                     missedScans += 1
                     if (missedScans % 12 === 0 && clicks < 4) {
@@ -170,13 +161,11 @@ class FishingHandler {
                     }
                     return
                 }
-                if (!seen.action) {
-                    if (!this.sawBar) {
-                        this.sawBar = true
-                        console.log('Green zone is on screen.')
-                    }
-                    return
+                if (!this.sawBar) {
+                    this.sawBar = true
+                    console.log('Green zone is on screen.')
                 }
+                if (!seen.action) return
 
                 switch (seen.action) {
                     case 'pull':

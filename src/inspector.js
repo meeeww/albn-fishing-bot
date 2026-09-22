@@ -135,9 +135,48 @@ function findSpot(parameters) {
     return null
 }
 
+const lastWorldAt = new Map()
+
+function collectSpots(value, found, depth) {
+    if (depth > 5 || value == null) return
+    if (Array.isArray(value)) {
+        const spot = coordinatePair(value)
+        if (spot && Math.abs(spot[0]) < 100000 && Math.abs(spot[1]) < 100000) {
+            found.push(spot)
+            return
+        }
+        for (const item of value) collectSpots(item, found, depth + 1)
+        return
+    }
+    if (typeof value === 'object') {
+        for (const item of Object.values(value)) collectSpots(item, found, depth + 1)
+    }
+}
+
+function plotWorld(kind, code, parameters) {
+    const spots = []
+    collectSpots(parameters, spots, 0)
+    const names = kind === 'request' ? REQUEST_NAMES : EVENT_NAMES
+    for (const [x, y] of spots) {
+        const key = `${kind}:${code}:${Math.round(x)}:${Math.round(y)}`
+        const seenAt = lastWorldAt.get(key) || 0
+        if (Date.now() - seenAt < 400) continue
+        lastWorldAt.set(key, Date.now())
+        addMarker({
+            id: nextMarkerId++,
+            t: Date.now(),
+            x,
+            y,
+            kind: 'world',
+            result: String(code),
+            label: `${code} ${names[code] || kind}`,
+        })
+    }
+}
+
 function addMarker(marker) {
     markers.push(marker)
-    if (markers.length > 400) markers.shift()
+    if (markers.length > 800) markers.shift()
     pushRadar(marker)
 }
 
@@ -192,12 +231,17 @@ function trackRadar(kind, message) {
         return
     }
 
-    if (kind !== 'event' || code !== 355 || !lastCast) return
-    const result = BITE_RESULTS[Number(parameters[3])]
-    if (!result || lastCast.result === 'caught' || lastCast.result === result) return
-    lastCast.result = result
-    lastCast.label = result
-    pushRadar(lastCast)
+    if (kind === 'event' && code === 355 && lastCast) {
+        const result = BITE_RESULTS[Number(parameters[3])]
+        if (result && lastCast.result !== 'caught' && lastCast.result !== result) {
+            lastCast.result = result
+            lastCast.label = result
+            pushRadar(lastCast)
+        }
+    }
+
+    const alreadyPlotted = kind === 'request' && (code === 22 || INPUT_NAMES[code])
+    if (!alreadyPlotted) plotWorld(kind, code, parameters)
 }
 
 function recordMessage(kind, message) {
@@ -301,6 +345,7 @@ function startInspector() {
             markers.length = 0
             lastCast = null
             inputsOnCast = 0
+            lastWorldAt.clear()
             res.writeHead(204)
             res.end()
             return
@@ -499,18 +544,20 @@ const RADAR_PAGE = `<!doctype html>
   .cast, .bite, .caught, .lost, .away, .cancelled { }
   .cast { color: #8f8874; } .bite { color: #e2c56a; } .caught { color: #7dcea0; } .lost, .away, .cancelled { color: #d36b6b; }
   .input { color: #7eb6ff; }
+  .world { color: #e39b54; }
 </style>
 </head>
 <body>
 <header>
   <div>
     <h1>Bite radar</h1>
-    <p>Casts are circles. Inputs — hook, pull, rest, and the other actions you send — are blue squares. <a href="/">Packet map</a></p>
+    <p>Casts are circles, inputs are blue squares, and every other packet that carries a position is an orange dot. <a href="/">Packet map</a></p>
   </div>
   <div class="controls">
-    <button type="button" data-filter="both" class="active">Both</button>
+    <button type="button" data-filter="all" class="active">All</button>
     <button type="button" data-filter="cast">Casts</button>
     <button type="button" data-filter="input">Inputs</button>
+    <button type="button" data-filter="world">Positions</button>
     <button id="clear" type="button">Clear</button>
   </div>
 </header>
@@ -526,10 +573,10 @@ const canvas = document.getElementById('map')
 const ctx = canvas.getContext('2d')
 const list = document.getElementById('list')
 const colors = { cast: '#8f8874', bite: '#e2c56a', caught: '#7dcea0', lost: '#d36b6b', 'got away': '#d36b6b', cancelled: '#d36b6b' }
-let filter = 'both'
+let filter = 'all'
 
 function shown() {
-  if (filter === 'both') return markers
+  if (filter === 'all' || filter === 'both') return markers
   return markers.filter((marker) => marker.kind === filter)
 }
 
@@ -575,11 +622,14 @@ function draw() {
   visible.forEach((marker, index) => {
     const px = 320 + ((marker.plotX ?? marker.x) - midX) * scale
     const py = 320 - ((marker.plotY ?? marker.y) - midY) * scale
-    const color = marker.kind === 'input' ? '#7eb6ff' : (colors[marker.result] || '#e7e1d1')
+    const color = marker.kind === 'input' ? '#7eb6ff' : marker.kind === 'world' ? '#e39b54' : (colors[marker.result] || '#e7e1d1')
     ctx.beginPath()
     ctx.fillStyle = color
     if (marker.kind === 'input') {
       ctx.fillRect(px - 5, py - 5, 10, 10)
+    } else if (marker.kind === 'world') {
+      ctx.arc(px, py, 4, 0, Math.PI * 2)
+      ctx.fill()
     } else {
       ctx.arc(px, py, marker.result === 'cast' ? 5 : 8, 0, Math.PI * 2)
       ctx.fill()
@@ -589,7 +639,7 @@ function draw() {
       ctx.stroke()
     }
     const item = document.createElement('li')
-    item.className = marker.kind === 'input' ? 'input' : (marker.result === 'got away' ? 'away' : marker.result)
+    item.className = marker.kind === 'input' ? 'input' : marker.kind === 'world' ? 'world' : (marker.result === 'got away' ? 'away' : marker.result)
     const time = new Date(marker.t).toLocaleTimeString(undefined, { hour12: false })
     item.textContent = time + '  ' + (marker.label || marker.result) + '  ' + marker.x.toFixed(1) + ', ' + marker.y.toFixed(1)
     list.appendChild(item)

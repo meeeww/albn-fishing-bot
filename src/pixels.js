@@ -27,7 +27,7 @@ const readPixel = (img, x, y) => {
     return [red, green, blue]
 }
 
-const isGreen = (red, green, blue) => green >= 170 && green >= red + 50 && green >= blue + 40
+const isGreen = (red, green, blue) => green >= 80 && green >= red + 18 && green >= blue + 12 && green > red && green > blue
 
 const isMarker = (red, green, blue) => {
     if (isGreen(red, green, blue)) return false
@@ -71,55 +71,81 @@ const clampToDisplay = (x, y, width, height) => {
     }
 }
 
-const getReelAction = (region) => {
-    const x = whole(region.x)
-    const y = whole(region.y)
-    const width = whole(region.width)
-    const height = whole(region.height)
-    if (x === null || y === null || !width || !height) return
-
-    const clamped = clampToDisplay(x, y, width, height)
-    if (!clamped) return { bar: false }
-
-    let img
+const screenBands = () => {
+    let displays = []
     try {
-        img = robot.screen.capture(clamped.x, clamped.y, clamped.width, clamped.height)
+        displays = robot.getDisplays() || []
     } catch {
-        return { bar: false }
+        displays = []
     }
-    if (!img?.image) return { bar: false }
-    const scanWidth = Math.min(clamped.width, img.width || clamped.width)
-    const scanHeight = Math.min(clamped.height, img.height || clamped.height)
+    if (!displays.length) {
+        const screen = robot.getScreenSize()
+        displays = [{ x: 0, y: 0, width: screen.width, height: screen.height }]
+    }
+    return displays.map((display) => clampToDisplay(
+        display.x + (display.width * 0.12),
+        display.y + (display.height * 0.28),
+        display.width * 0.76,
+        display.height * 0.44,
+    )).filter(Boolean)
+}
 
+const isBobber = (red, green, blue) => {
+    if (isGreen(red, green, blue)) return false
+    const max = Math.max(red, green, blue)
+    const min = Math.min(red, green, blue)
+    if (max >= 165 && (max - min) < 110) return true
+    return red >= 150 && green >= 110 && blue < 140
+}
+
+const getReelAction = () => {
     let best = null
-    for (let row = 0; row < scanHeight; row += 2) {
-        let run = 0
-        let runStart = 0
-        let longest = 0
-        let longestStart = 0
-        for (let col = 0; col < scanWidth; col += 2) {
-            const [red, green, blue] = readPixel(img, col, row)
-            if (isGreen(red, green, blue)) {
-                if (run === 0) runStart = col
-                run += 2
-            } else if (run > longest) {
+    let scanWidth = 0
+    let scanHeight = 0
+    let img = null
+
+    for (const band of screenBands()) {
+        let captured
+        try {
+            captured = robot.screen.capture(band.x, band.y, band.width, band.height)
+        } catch {
+            continue
+        }
+        if (!captured?.image) continue
+        const width = Math.min(band.width, captured.width || band.width)
+        const height = Math.min(band.height, captured.height || band.height)
+        for (let row = 0; row < height; row += 3) {
+            let run = 0
+            let runStart = 0
+            let longest = 0
+            let longestStart = 0
+            for (let col = 0; col < width; col += 3) {
+                const [red, green, blue] = readPixel(captured, col, row)
+                if (isGreen(red, green, blue)) {
+                    if (run === 0) runStart = col
+                    run += 3
+                } else if (run > longest) {
+                    longest = run
+                    longestStart = runStart
+                    run = 0
+                } else {
+                    run = 0
+                }
+            }
+            if (run > longest) {
                 longest = run
                 longestStart = runStart
-                run = 0
-            } else {
-                run = 0
             }
-        }
-        if (run > longest) {
-            longest = run
-            longestStart = runStart
-        }
-        if (longest >= 24 && (!best || longest > best.length)) {
-            best = { row, start: longestStart, length: longest }
+            if (longest >= 36 && (!best || longest > best.length)) {
+                best = { row, start: longestStart, length: longest }
+                img = captured
+                scanWidth = width
+                scanHeight = height
+            }
         }
     }
 
-    if (!best) return { bar: false }
+    if (!best || !img) return { bar: false }
 
     const markerXs = []
     const top = Math.max(0, best.row - 10)
@@ -127,10 +153,12 @@ const getReelAction = (region) => {
     for (let row = top; row <= bottom; row++) {
         for (let col = 0; col < scanWidth; col++) {
             const [red, green, blue] = readPixel(img, col, row)
-            if (isMarker(red, green, blue)) markerXs.push(col)
+            if (isBobber(red, green, blue)) markerXs.push(col)
         }
     }
-    if (markerXs.length < 2) return { bar: true, action: null }
+    if (markerXs.length < 2) {
+        return { bar: true, action: Date.now() % 700 < 320 ? 'pull' : 'rest' }
+    }
 
     markerXs.sort((a, b) => a - b)
     const markerX = markerXs[Math.floor(markerXs.length / 2)]
