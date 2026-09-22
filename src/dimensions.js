@@ -26,15 +26,18 @@ const getTargetCoordinates = (windowInstance) => {
     } = getDimensions(windowInstance)
 
     const yBuffer = 23;
-    const x = left + (winWidth / 2)
-    const y = top + (winHeight / 2) + yBuffer
+    const x = Math.round(left + (winWidth / 2))
+    const y = Math.round(top + (winHeight / 2) + yBuffer)
     const center = [x, y - yBuffer]
 
     return {
         pullPoint: [x, y],
         restPoint: [x + 15, y],
         throwPoint: [x - 100, y - 65],
-        fishBaitCoor: [center[0] + (center[0] * 0.375), center[1] + (center[1] * 0.15)],
+        fishBaitCoor: [
+            Math.round(center[0] + (center[0] * 0.375)),
+            Math.round(center[1] + (center[1] * 0.15)),
+        ],
         center,
     }
 }

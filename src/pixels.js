@@ -14,12 +14,18 @@ const getPixelColorAt = (x, y) => {
     return classified;
 }
 
-const getActionFromCoordinates = (pullPoint, restPoint) => {
-    const leftX = Math.min(pullPoint[0], restPoint[0]);
-    const rightX = Math.max(pullPoint[0], restPoint[0]);
-    const y = pullPoint[1];
-    const width = rightX - leftX;
+const whole = (value) => {
+    const rounded = Math.round(value)
+    return Number.isFinite(rounded) ? rounded : null
+}
 
+const getActionFromCoordinates = (pullPoint, restPoint) => {
+    const leftX = whole(Math.min(pullPoint[0], restPoint[0]));
+    const rightX = whole(Math.max(pullPoint[0], restPoint[0]));
+    const y = whole(pullPoint[1]);
+    if (leftX === null || rightX === null || y === null) return;
+
+    const width = rightX - leftX;
     if (width <= 0) return;
 
     // Dynamically scan the entire bar between pullPoint and restPoint natively

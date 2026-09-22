@@ -138,15 +138,21 @@ class FishingHandler {
         this.reeling = true
         this.windowInstance.setForeground()
         this.loopInterval = setInterval(() => {
-            const action = getAction(this.pullPoint, this.restPoint)
+            try {
+                const action = getAction(this.pullPoint, this.restPoint)
 
-            switch (action) {
-                case 'pull':
-                    return FishingActions.pull(this.throwPoint[0], this.throwPoint[1])
-                case 'rest':
-                    return FishingActions.rest(this.throwPoint[0], this.throwPoint[1])
-                default:
-                    break;
+                switch (action) {
+                    case 'pull':
+                        return FishingActions.pull(this.throwPoint[0], this.throwPoint[1])
+                    case 'rest':
+                        return FishingActions.rest(this.throwPoint[0], this.throwPoint[1])
+                    default:
+                        break;
+                }
+            } catch (error) {
+                if (this.reelError) return
+                this.reelError = error.message
+                console.log('Reel scan failed:', error.message)
             }
         }, 20)
         this.autoRestart.reboundTimeout()
