@@ -147,27 +147,45 @@ const getReelAction = () => {
 
     if (!best || !img) return { bar: false }
 
-    const markerXs = []
-    const top = Math.max(0, best.row - 10)
-    const bottom = Math.min(scanHeight - 1, best.row + 10)
+    const counts = new Array(scanWidth).fill(0)
+    const top = Math.max(0, best.row - 8)
+    const bottom = Math.min(scanHeight - 1, best.row + 8)
     for (let row = top; row <= bottom; row++) {
         for (let col = 0; col < scanWidth; col++) {
             const [red, green, blue] = readPixel(img, col, row)
-            if (isBobber(red, green, blue)) markerXs.push(col)
+            if (isBobber(red, green, blue)) counts[col] += 1
         }
     }
-    if (markerXs.length < 2) {
-        return { bar: true, action: Date.now() % 700 < 320 ? 'pull' : 'rest' }
+
+    let peak = null
+    let runStart = -1
+    const closeRun = (runEnd) => {
+        const width = runEnd - runStart
+        if (width < 2 || width > 24) return
+        let score = 0
+        for (let col = runStart; col <= runEnd; col++) score += counts[col]
+        if (!peak || score > peak.score) {
+            peak = { x: runStart + (width / 2), score }
+        }
+    }
+    for (let col = 0; col < scanWidth; col++) {
+        if (counts[col] > 0) {
+            if (runStart < 0) runStart = col
+        } else if (runStart >= 0) {
+            closeRun(col - 1)
+            runStart = -1
+        }
+    }
+    if (runStart >= 0) closeRun(scanWidth - 1)
+
+    // Mouse up lets the bobber slide left, out of the green, and the fish is lost.
+    // Always hold or release. A missing bobber still has to be steered.
+    if (!peak) {
+        return { bar: true, action: Date.now() % 560 < 300 ? 'pull' : 'rest' }
     }
 
-    markerXs.sort((a, b) => a - b)
-    const markerX = markerXs[Math.floor(markerXs.length / 2)]
     const zoneCenter = best.start + (best.length / 2)
-    const slack = Math.max(6, best.length * 0.2)
-
-    if (markerX < zoneCenter - slack) return { bar: true, action: 'pull' }
-    if (markerX > zoneCenter + slack) return { bar: true, action: 'rest' }
-    return { bar: true, action: null }
+    return { bar: true, action: peak.x < zoneCenter ? 'pull' : 'rest' }
 }
 
 const getActionFromCoordinates = (pullPoint, restPoint) => {

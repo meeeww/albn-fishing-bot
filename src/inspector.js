@@ -6,6 +6,8 @@ const MAX_ROWS = 400
 const EVENT_NAMES = {
     10: 'ActiveSpellEffectsUpdate',
     87: 'CharacterEquipmentChanged',
+    36: 'Harvestables',
+    37: 'Harvestable',
     355: 'Fishing state',
     360: 'Float',
     361: 'Minigame',
@@ -101,6 +103,7 @@ function codeOf(kind, message) {
 
 function shouldKeep(kind, code) {
     if (kind === 'bot') return true
+    if (code === 36 || code === 37) return true
     if (kind === 'request') return true
     if (FISHING_CODES.has(Number(code))) return true
     if (typeof code === 'number' && code >= 340 && code <= 380) return true
@@ -151,6 +154,76 @@ function collectSpots(value, found, depth) {
     if (typeof value === 'object') {
         for (const item of Object.values(value)) collectSpots(item, found, depth + 1)
     }
+}
+
+const materials = new Map()
+
+function byteList(value) {
+    if (Array.isArray(value)) return value
+    if (Buffer.isBuffer(value)) return Array.from(value)
+    if (value && Array.isArray(value.data)) return value.data
+    if (value && Buffer.isBuffer(value.data)) return Array.from(value.data)
+    return []
+}
+
+function materialName(type) {
+    const code = Number(type)
+    if (code >= 0 && code <= 5) return 'wood'
+    if (code >= 6 && code <= 10) return 'rock'
+    if (code >= 11 && code <= 14) return 'fiber'
+    if (code >= 15 && code <= 22) return 'hide'
+    if (code >= 23 && code <= 27) return 'ore'
+    return 'material'
+}
+
+function upsertMaterial(node) {
+    const marker = {
+        id: `mat-${node.id}`,
+        t: Date.now(),
+        x: node.x,
+        y: node.y,
+        kind: 'material',
+        result: node.name,
+        label: `T${node.tier} ${node.name}`,
+    }
+    materials.set(String(node.id), marker)
+    const index = markers.findIndex((item) => item.id === marker.id)
+    if (index === -1) markers.push(marker)
+    else markers[index] = marker
+    if (markers.length > 800) markers.shift()
+    pushRadar(marker)
+}
+
+function plotMaterials(code, parameters) {
+    if (code === 36) {
+        const ids = Array.isArray(parameters[0]) ? parameters[0] : []
+        const types = byteList(parameters[1])
+        const tiers = byteList(parameters[2])
+        const positions = Array.isArray(parameters[3]) ? parameters[3] : []
+        for (let i = 0; i < ids.length; i++) {
+            const x = Number(positions[i * 2])
+            const y = Number(positions[i * 2 + 1])
+            if (!Number.isFinite(x) || !Number.isFinite(y)) continue
+            upsertMaterial({
+                id: ids[i],
+                x,
+                y,
+                tier: Number(tiers[i]) || 0,
+                name: materialName(types[i]),
+            })
+        }
+        return
+    }
+
+    const location = coordinatePair(parameters[8])
+    if (!location) return
+    upsertMaterial({
+        id: parameters[0],
+        x: location[0],
+        y: location[1],
+        tier: Number(parameters[7]) || 0,
+        name: materialName(parameters[5]),
+    })
 }
 
 function plotWorld(kind, code, parameters) {
@@ -238,6 +311,11 @@ function trackRadar(kind, message) {
             lastCast.label = result
             pushRadar(lastCast)
         }
+    }
+
+    if (kind === 'event' && (code === 36 || code === 37)) {
+        plotMaterials(code, parameters)
+        return
     }
 
     const alreadyPlotted = kind === 'request' && (code === 22 || INPUT_NAMES[code])
@@ -346,6 +424,7 @@ function startInspector() {
             lastCast = null
             inputsOnCast = 0
             lastWorldAt.clear()
+            materials.clear()
             res.writeHead(204)
             res.end()
             return
@@ -545,19 +624,21 @@ const RADAR_PAGE = `<!doctype html>
   .cast { color: #8f8874; } .bite { color: #e2c56a; } .caught { color: #7dcea0; } .lost, .away, .cancelled { color: #d36b6b; }
   .input { color: #7eb6ff; }
   .world { color: #e39b54; }
+  .material { color: #8fce6a; }
 </style>
 </head>
 <body>
 <header>
   <div>
     <h1>Bite radar</h1>
-    <p>Casts are circles, inputs are blue squares, and every other packet that carries a position is an orange dot. <a href="/">Packet map</a></p>
+    <p>Materials from events 36 and 37 are green. Casts, inputs, and other positions stay on their own colors. <a href="/">Packet map</a></p>
   </div>
   <div class="controls">
     <button type="button" data-filter="all" class="active">All</button>
     <button type="button" data-filter="cast">Casts</button>
     <button type="button" data-filter="input">Inputs</button>
     <button type="button" data-filter="world">Positions</button>
+    <button type="button" data-filter="material">Materials</button>
     <button id="clear" type="button">Clear</button>
   </div>
 </header>
@@ -622,10 +703,16 @@ function draw() {
   visible.forEach((marker, index) => {
     const px = 320 + ((marker.plotX ?? marker.x) - midX) * scale
     const py = 320 - ((marker.plotY ?? marker.y) - midY) * scale
-    const color = marker.kind === 'input' ? '#7eb6ff' : marker.kind === 'world' ? '#e39b54' : (colors[marker.result] || '#e7e1d1')
+    const materialColors = { wood: '#c4a574', rock: '#c5c8c2', fiber: '#8fce6a', hide: '#d4a574', ore: '#7eb6ff' }
+    const color = marker.kind === 'input' ? '#7eb6ff'
+      : marker.kind === 'world' ? '#e39b54'
+      : marker.kind === 'material' ? (materialColors[marker.result] || '#8fce6a')
+      : (colors[marker.result] || '#e7e1d1')
     ctx.beginPath()
     ctx.fillStyle = color
-    if (marker.kind === 'input') {
+    if (marker.kind === 'material') {
+      ctx.fillRect(px - 4, py - 4, 8, 8)
+    } else if (marker.kind === 'input') {
       ctx.fillRect(px - 5, py - 5, 10, 10)
     } else if (marker.kind === 'world') {
       ctx.arc(px, py, 4, 0, Math.PI * 2)
@@ -639,7 +726,7 @@ function draw() {
       ctx.stroke()
     }
     const item = document.createElement('li')
-    item.className = marker.kind === 'input' ? 'input' : marker.kind === 'world' ? 'world' : (marker.result === 'got away' ? 'away' : marker.result)
+    item.className = marker.kind === 'input' ? 'input' : marker.kind === 'world' ? 'world' : marker.kind === 'material' ? 'material' : (marker.result === 'got away' ? 'away' : marker.result)
     const time = new Date(marker.t).toLocaleTimeString(undefined, { hour12: false })
     item.textContent = time + '  ' + (marker.label || marker.result) + '  ' + marker.x.toFixed(1) + ', ' + marker.y.toFixed(1)
     list.appendChild(item)

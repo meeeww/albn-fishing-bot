@@ -165,8 +165,6 @@ class FishingHandler {
                     this.sawBar = true
                     console.log('Green zone is on screen.')
                 }
-                if (!seen.action) return
-
                 switch (seen.action) {
                     case 'pull':
                         return FishingActions.pull(this.throwPoint[0], this.throwPoint[1])
