@@ -7,7 +7,6 @@ let isPulling = false
 
 class FishingActions {
     static release() {
-        if (!isPulling) return
         robot.mouseToggle("up", "left")
         isPulling = false
     }
@@ -23,8 +22,12 @@ class FishingActions {
         this.release()
         robot.moveMouse(Math.round(x), Math.round(y));
         robot.mouseToggle("down", "left");
-        await sleep(CAST_HOLD_MS)
-        robot.mouseToggle("up", "left")
+        try {
+            await sleep(CAST_HOLD_MS)
+        } finally {
+            robot.mouseToggle("up", "left")
+            isPulling = false
+        }
     }
 
     static hook(x, y) {

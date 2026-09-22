@@ -140,8 +140,7 @@ class FishingHandler {
         this.reeling = true
         this.sawBar = false
         this.reelError = false
-        this.reelPace = 1
-        this.reelBumps = {}
+        this.reelSpeed = 1
         this.windowInstance.setForeground()
         FishingActions.hook(this.throwPoint[0], this.throwPoint[1])
         await this.playReel(token)
@@ -149,15 +148,11 @@ class FishingHandler {
     }
 
     noteMinigame(eventCode, parameters) {
-        if (this.phase !== 'minigame') return
-        const mark = Number(parameters?.[3])
-        const harder = eventCode === 362 ? mark >= 1.4 : mark >= 3
-        if (!harder) return
-        const key = eventCode === 362 ? 'sync' : 'game'
-        if (this.reelBumps[key]) return
-        this.reelBumps[key] = true
-        this.reelPace = Math.min(3, (this.reelPace || 1) + 1)
-        console.log(`Faster fish. Shorter releases (${this.reelPace}).`)
+        if (eventCode !== 362 || this.phase !== 'minigame') return
+        const speed = Number(parameters?.[3])
+        if (!Number.isFinite(speed) || speed <= 0) return
+        this.reelSpeed = speed
+        console.log(`Reel speed ${speed}.`)
     }
 
     reelAlive(token) {
@@ -166,12 +161,10 @@ class FishingHandler {
 
     async playReel(token) {
         const between = (min, max) => min + Math.floor(Math.random() * (max - min + 1))
-        const pause = async (ms, cutShortOnPace) => {
-            const paceAtStart = this.reelPace || 1
+        const pause = async (ms) => {
             let left = ms
             while (left > 0) {
                 if (!this.reelAlive(token)) return false
-                if (cutShortOnPace && (this.reelPace || 1) > paceAtStart) return true
                 const slice = Math.min(30, left)
                 await sleep(slice)
                 left -= slice
@@ -179,16 +172,16 @@ class FishingHandler {
             return true
         }
 
-        await pause(between(40, 90), false)
+        await pause(between(40, 90))
         while (this.reelAlive(token)) {
-            const pace = this.reelPace || 1
-            const hold = pace >= 3 ? between(320, 520) : pace >= 2 ? between(400, 680) : between(520, 900)
-            const rest = pace >= 3 ? between(40, 70) : pace >= 2 ? between(55, 90) : between(80, 130)
+            const speed = Math.min(2.5, Math.max(0.75, this.reelSpeed || 1))
+            const hold = Math.round(between(640, 860) / speed)
+            const rest = Math.max(60, Math.round(between(100, 145) / speed))
 
             FishingActions.pull(this.throwPoint[0], this.throwPoint[1])
-            if (!await pause(hold, false)) return
+            if (!await pause(hold)) return
             FishingActions.rest(this.throwPoint[0], this.throwPoint[1])
-            if (!await pause(rest, true)) return
+            if (!await pause(rest)) return
         }
     }
 
