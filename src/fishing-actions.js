@@ -18,10 +18,22 @@ class FishingActions {
         robot.mouseToggle("up")
     }
 
+    static async hook(x, y) {
+        console.log('action: hook')
+        if (isPulling) {
+            robot.mouseToggle("up")
+            isPulling = false
+        }
+        robot.moveMouse(Math.round(x), Math.round(y))
+        robot.mouseToggle("down")
+        await sleep(80)
+        robot.mouseToggle("up")
+    }
+
     static pull(x, y) {
         if (!isPulling) {
             console.log('action: pull')
-            robot.moveMouse(x, y);
+            robot.moveMouse(Math.round(x), Math.round(y));
             robot.mouseToggle("down");
             isPulling = true;
         }
@@ -30,7 +42,7 @@ class FishingActions {
     static rest(x, y) {
         if (isPulling) {
             console.log('action: rest')
-            robot.moveMouse(x, y);
+            robot.moveMouse(Math.round(x), Math.round(y));
             robot.mouseToggle("up");
             isPulling = false;
         }

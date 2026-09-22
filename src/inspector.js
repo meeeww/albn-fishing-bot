@@ -1,6 +1,6 @@
 const http = require('http')
 
-const PORT = 4789
+const PORT = Number(process.env.PACKET_PORT) || 4789
 const MAX_ROWS = 400
 
 const EVENT_NAMES = {
@@ -47,6 +47,17 @@ const rows = []
 const clients = new Set()
 let nextId = 1
 let showAll = false
+const markers = []
+let nextMarkerId = 1
+let lastMarker = null
+
+const BITE_RESULTS = {
+    5: 'bite',
+    9: 'caught',
+    10: 'lost',
+    14: 'got away',
+    15: 'cancelled',
+}
 
 function plain(value, depth = 0) {
     if (typeof value === 'bigint') return value.toString()
@@ -91,7 +102,49 @@ function pushRow(row) {
     for (const client of clients) client.write(payload)
 }
 
+function coordinatePair(value) {
+    if (!Array.isArray(value) || value.length < 2) return null
+    const x = Number(value[0])
+    const y = Number(value[1])
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null
+    return [x, y]
+}
+
+function pushRadar(marker) {
+    const payload = `event: radar\ndata: ${JSON.stringify(marker)}\n\n`
+    for (const client of clients) client.write(payload)
+}
+
+function trackRadar(kind, message) {
+    const parameters = message?.parameters || {}
+    const code = Number(codeOf(kind, message))
+
+    if (kind === 'request' && code === 22) {
+        const spot = coordinatePair(parameters[3]) || coordinatePair(parameters[1])
+        if (!spot) return
+        const marker = {
+            id: nextMarkerId++,
+            t: Date.now(),
+            x: spot[0],
+            y: spot[1],
+            result: 'cast',
+        }
+        markers.push(marker)
+        if (markers.length > 200) markers.shift()
+        lastMarker = marker
+        pushRadar(marker)
+        return
+    }
+
+    if (kind !== 'event' || code !== 355 || !lastMarker) return
+    const result = BITE_RESULTS[Number(parameters[3])]
+    if (!result || lastMarker.result === 'caught' || lastMarker.result === result) return
+    lastMarker.result = result
+    pushRadar(lastMarker)
+}
+
 function recordMessage(kind, message) {
+    trackRadar(kind, message)
     const parameters = message?.parameters || {}
     const code = codeOf(kind, message)
     if (!shouldKeep(kind, code)) return
@@ -143,6 +196,18 @@ function startInspector() {
             return
         }
 
+        if (req.method === 'GET' && url.pathname === '/radar') {
+            res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+            res.end(RADAR_PAGE)
+            return
+        }
+
+        if (req.method === 'GET' && url.pathname === '/api/radar') {
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ markers }))
+            return
+        }
+
         if (req.method === 'GET' && url.pathname === '/api/recent') {
             res.writeHead(200, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ showAll, rows }))
@@ -175,12 +240,21 @@ function startInspector() {
             return
         }
 
+        if (req.method === 'POST' && url.pathname === '/api/radar/clear') {
+            markers.length = 0
+            lastMarker = null
+            res.writeHead(204)
+            res.end()
+            return
+        }
+
         res.writeHead(404)
         res.end()
     })
 
     server.listen(PORT, '127.0.0.1', () => {
         console.log(`Packet map: http://127.0.0.1:${PORT}`)
+        console.log(`Bite radar: http://127.0.0.1:${PORT}/radar`)
     })
 }
 
@@ -222,7 +296,7 @@ const PAGE = `<!doctype html>
 <header>
   <div>
     <h1>Fishing packet map</h1>
-    <p>Each row is one decoded game message. Select it to see every byte with its index and decimal value.</p>
+    <p>Each row is one decoded game message. Select it to see every byte with its index and decimal value. <a href="/radar">Bite radar</a></p>
   </div>
   <div class="controls">
     <label><input id="all" type="checkbox"> Every event</label>
@@ -341,6 +415,119 @@ fetch('/api/recent').then((res) => res.json()).then((data) => {
 
 const source = new EventSource('/stream')
 source.onmessage = (event) => add(JSON.parse(event.data))
+</script>
+</body>
+</html>`
+
+const RADAR_PAGE = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Bite radar</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; font: 14px/1.4 ui-sans-serif, sans-serif; background: #12140f; color: #e7e1d1; }
+  header { padding: 16px 20px; display: flex; justify-content: space-between; align-items: end; gap: 16px; }
+  h1 { font-size: 18px; margin: 0 0 4px; font-weight: 600; }
+  p, a { color: #b7b09d; }
+  a { color: #e2c56a; }
+  button { background: #1d2118; color: inherit; border: 1px solid #3a4030; border-radius: 6px; padding: 6px 10px; }
+  main { display: grid; grid-template-columns: 640px 1fr; gap: 16px; padding: 0 20px 24px; }
+  canvas { background: #1a1e16; border: 1px solid #2e3426; border-radius: 10px; width: 640px; height: 640px; }
+  aside { background: #1a1e16; border: 1px solid #2e3426; border-radius: 10px; padding: 12px 14px; max-height: 640px; overflow: auto; }
+  li { margin: 6px 0; font-variant-numeric: tabular-nums; }
+  .cast { color: #8f8874; } .bite { color: #e2c56a; } .caught { color: #7dcea0; } .lost, .away, .cancelled { color: #d36b6b; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Bite radar</h1>
+    <p>Each dot is a cast. It turns gold on a bite and green when the fish is caught. <a href="/">Packet map</a></p>
+  </div>
+  <button id="clear" type="button">Clear</button>
+</header>
+<main>
+  <canvas id="map" width="640" height="640"></canvas>
+  <aside>
+    <ul id="list"></ul>
+  </aside>
+</main>
+<script>
+const markers = []
+const canvas = document.getElementById('map')
+const ctx = canvas.getContext('2d')
+const list = document.getElementById('list')
+const colors = { cast: '#8f8874', bite: '#e2c56a', caught: '#7dcea0', lost: '#d36b6b', 'got away': '#d36b6b', cancelled: '#d36b6b' }
+
+function upsert(marker) {
+  const index = markers.findIndex((item) => item.id === marker.id)
+  if (index === -1) markers.push(marker)
+  else markers[index] = marker
+  draw()
+}
+
+function draw() {
+  ctx.clearRect(0, 0, 640, 640)
+  ctx.strokeStyle = '#2e3426'
+  ctx.strokeRect(24, 24, 592, 592)
+  ctx.beginPath()
+  ctx.arc(320, 320, 220, 0, Math.PI * 2)
+  ctx.stroke()
+
+  if (!markers.length) {
+    ctx.fillStyle = '#b7b09d'
+    ctx.font = '14px sans-serif'
+    ctx.fillText('No casts yet. Throw the line.', 32, 48)
+    list.innerHTML = ''
+    return
+  }
+
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+  for (const marker of markers) {
+    minX = Math.min(minX, marker.x)
+    maxX = Math.max(maxX, marker.x)
+    minY = Math.min(minY, marker.y)
+    maxY = Math.max(maxY, marker.y)
+  }
+  const span = Math.max(maxX - minX, maxY - minY, 20)
+  const scale = 520 / span
+  const midX = (minX + maxX) / 2
+  const midY = (minY + maxY) / 2
+
+  list.innerHTML = ''
+  markers.forEach((marker, index) => {
+    const px = 320 + (marker.x - midX) * scale
+    const py = 320 - (marker.y - midY) * scale
+    ctx.beginPath()
+    ctx.fillStyle = colors[marker.result] || '#e7e1d1'
+    ctx.arc(px, py, marker.result === 'cast' ? 5 : 8, 0, Math.PI * 2)
+    ctx.fill()
+    if (index === markers.length - 1) {
+      ctx.strokeStyle = '#e7e1d1'
+      ctx.stroke()
+    }
+    const item = document.createElement('li')
+    item.className = marker.result === 'got away' ? 'away' : marker.result
+    const time = new Date(marker.t).toLocaleTimeString(undefined, { hour12: false })
+    item.textContent = time + '  ' + marker.result + '  ' + marker.x.toFixed(1) + ', ' + marker.y.toFixed(1)
+    list.appendChild(item)
+  })
+}
+
+document.getElementById('clear').onclick = async () => {
+  await fetch('/api/radar/clear', { method: 'POST' })
+  markers.length = 0
+  draw()
+}
+
+fetch('/api/radar').then((res) => res.json()).then((data) => {
+  for (const marker of data.markers) upsert(marker)
+  if (!data.markers.length) draw()
+})
+
+const source = new EventSource('/stream')
+source.addEventListener('radar', (event) => upsert(JSON.parse(event.data)))
 </script>
 </body>
 </html>`

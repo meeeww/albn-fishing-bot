@@ -1,7 +1,7 @@
 const { FishingState } = require("./enums/FishingState");
 const { FishingActions } = require("./fishing-actions");
 const { FishBuffs } = require("./enums/FishBuffs")
-const { getActionFromCoordinates: getAction } = require("./pixels");
+const { getReelAction } = require("./pixels");
 const { sleep } = require("./utils");
 const { Items } = require("./enums/Items");
 const { ProcessQueue } = require("./process-queue");
@@ -136,12 +136,42 @@ class FishingHandler {
 
         this.phase = 'minigame'
         this.reeling = true
+        this.sawBar = false
         this.windowInstance.setForeground()
+        await FishingActions.hook(this.throwPoint[0], this.throwPoint[1])
+        await sleep(400)
+        if (!this.isEnabled || !this.reeling) return
+
+        const rect = this.windowInstance.getDimensions()
+        const winWidth = rect.right - rect.left
+        const winHeight = rect.bottom - rect.top
+        const region = {
+            x: rect.left + (winWidth * 0.2),
+            y: rect.top + (winHeight * 0.38),
+            width: winWidth * 0.6,
+            height: winHeight * 0.24,
+        }
+        let missedScans = 0
+
         this.loopInterval = setInterval(() => {
             try {
-                const action = getAction(this.pullPoint, this.restPoint)
+                const seen = getReelAction(region)
+                if (!seen?.bar) {
+                    missedScans += 1
+                    if (missedScans === 20) {
+                        console.log('Reel bar is not visible. The green zone has to be on screen.')
+                    }
+                    return
+                }
+                if (!seen.action) {
+                    if (!this.sawBar) {
+                        this.sawBar = true
+                        console.log('Green zone is on screen.')
+                    }
+                    return
+                }
 
-                switch (action) {
+                switch (seen.action) {
                     case 'pull':
                         return FishingActions.pull(this.throwPoint[0], this.throwPoint[1])
                     case 'rest':
@@ -154,7 +184,7 @@ class FishingHandler {
                 this.reelError = error.message
                 console.log('Reel scan failed:', error.message)
             }
-        }, 20)
+        }, 40)
         this.autoRestart.reboundTimeout()
     }
 
