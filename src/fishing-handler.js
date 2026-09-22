@@ -8,6 +8,13 @@ const { ProcessQueue } = require("./process-queue");
 const { checkIsIgnored } = require("./enums/IgnoredFishes");
 const { AutoRestart } = require("./auto-restart");
 
+const STATE_LABEL = {
+    [FishingState.WIN]: 'caught',
+    [FishingState.LOST]: 'lost',
+    [FishingState.GET_AWAY]: 'got away',
+    [FishingState.CANCEL]: 'cancelled',
+}
+
 class FishingHandler {
     isEnabled = false
 
@@ -50,6 +57,8 @@ class FishingHandler {
         this.autoRestart = new AutoRestart(() => this.recover(), 60000)
         this.phase = 'idle'
         this.restarting = false
+        this.sessionId = undefined
+        this.reeling = false
     }
 
     setEnabled(isEnabled) {
@@ -58,6 +67,8 @@ class FishingHandler {
         if (isEnabled) {
             // The cast that just hit the water is already out. Wait for the bite.
             this.phase = 'in-water'
+            this.sessionId = undefined
+            this.reeling = false
             this.landedAt = Date.now()
             console.log('Waiting for a bite.')
             this.autoRestart.turnOn()
@@ -77,15 +88,11 @@ class FishingHandler {
 
     async updateState(parameters) {
         const fishingState = parameters[3];
-
         if (!fishingState) return;
-        // Ignore fishingId mismatch to properly handle events, lock to playerId
-        // if (parameters[1] != this.fishingId) return;
 
-        if (this.playerId && parameters[0] !== this.playerId) return;
-        if (!this.playerId) {
-            this.playerId = parameters[0];
-        }
+        const sessionId = parameters[0]
+        if (this.sessionId && sessionId !== this.sessionId) return
+        if (!this.sessionId) this.sessionId = sessionId
 
         switch (fishingState) {
             case FishingState.THROW:
@@ -93,6 +100,12 @@ class FishingHandler {
                 this.phase = 'in-water'
                 break;
             case FishingState.HOOKED:
+                if (!this.reeling) {
+                    console.log('Bite. Reeling.')
+                    this.onNote?.('Bite. Reeling.')
+                    await this.startPulling(sessionId, parameters)
+                }
+                break;
             case FishingState.PULL:
             case FishingState.REST:
                 this.phase = 'minigame'
@@ -101,7 +114,8 @@ class FishingHandler {
             case FishingState.LOST:
             case FishingState.WIN:
             case FishingState.CANCEL:
-                this.restart(this.playerId, `state ${fishingState} in parameters[3]`);
+                this.reeling = false
+                this.restart(this.playerId, STATE_LABEL[fishingState] || `state ${fishingState}`);
                 break;
             default:
                 break;
@@ -121,6 +135,8 @@ class FishingHandler {
         }
 
         this.phase = 'minigame'
+        this.reeling = true
+        this.windowInstance.setForeground()
         this.loopInterval = setInterval(() => {
             const action = getAction(this.pullPoint, this.restPoint)
 
@@ -150,6 +166,8 @@ class FishingHandler {
         this.windowInstance.setForeground();
         await FishingActions.throwBait(this.throwPoint[0], this.throwPoint[1])
         if (!this.isEnabled) return;
+        this.sessionId = undefined
+        this.reeling = false
         this.phase = 'in-water'
         this.landedAt = Date.now()
         console.log('Waiting for a bite.')

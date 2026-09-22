@@ -40,17 +40,8 @@ listener.on('event', async (res) => {
     if (!eventCode) return
 
     switch (eventCode) {
-        case FishingEvents.FishingStart:
+        case FishingEvents.FishingState:
             await fishingHandler.updateState(parameters);
-            break;
-        case FishingEvents.FishingMiniGame:
-            await fishingHandler.startPulling(playerId, parameters);
-            break;
-        case FishingEvents.FishingFinished:
-            await fishingHandler.restart(playerId, 'event 354 FishingFinished');
-            break;
-        case FishingEvents.FishingCancel:
-            await fishingHandler.restart(playerId, 'event 355 FishingCancel');
             break;
         case FishingEvents.CharacterEquipmentChanged:
             fishingHandler.addToQueue(fishingHandler.equipBuff, playerId, parameters);

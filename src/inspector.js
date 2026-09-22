@@ -6,19 +6,24 @@ const MAX_ROWS = 400
 const EVENT_NAMES = {
     10: 'ActiveSpellEffectsUpdate',
     87: 'CharacterEquipmentChanged',
-    351: 'FishingStart',
-    352: 'FishingCast',
-    353: 'FishingCatch',
-    354: 'FishingFinished',
-    355: 'FishingCancel',
-    356: 'NewFloatObject',
-    357: 'NewFishingZoneObject',
-    358: 'FishingMiniGame',
+    355: 'Fishing state',
+    360: 'Float',
+    361: 'Minigame',
+    362: 'Minigame sync',
+    363: 'Fishing fame',
+    377: 'Catch reward',
 }
 
 const REQUEST_NAMES = {
     21: 'Move (disables the bot)',
+    22: 'Throw line',
     316: 'Bait hit the water (enables the bot)',
+    318: 'Line confirmed',
+    319: 'Start reel',
+    320: 'Pull',
+    321: 'Rest',
+    322: 'Finish reel',
+    323: 'Collect',
 }
 
 const STATE_NAMES = {
@@ -34,7 +39,8 @@ const STATE_NAMES = {
 }
 
 const FISHING_CODES = new Set([
-    10, 87, 21, 316, 351, 352, 353, 354, 355, 356, 357, 358,
+    10, 87, 21, 22, 316, 318, 319, 320, 321, 322, 323,
+    355, 360, 361, 362, 363, 377,
 ])
 
 const rows = []
@@ -228,17 +234,16 @@ const PAGE = `<!doctype html>
   <aside>
     <h2>Event codes</h2>
     <ul>
-      <li><code>351</code> FishingStart — parameters[3] is the state</li>
-      <li><code>352</code> FishingCast</li>
-      <li><code>353</code> FishingCatch</li>
-      <li><code>354</code> FishingFinished</li>
-      <li><code>355</code> FishingCancel</li>
-      <li><code>358</code> FishingMiniGame</li>
+      <li><code>355</code> fishing state — parameters[3] is throw, bite, pull, rest, or win</li>
+      <li><code>361</code> minigame starts</li>
       <li><code>10</code> buffs, <code>87</code> equipment</li>
     </ul>
     <h2>Your actions (requests)</h2>
     <ul>
+      <li><code>22</code> throw the line</li>
       <li><code>316</code> bait hit the water</li>
+      <li><code>320</code> pull, <code>321</code> rest</li>
+      <li><code>322</code> finish, <code>323</code> collect</li>
       <li><code>21</code> you moved</li>
     </ul>
     <h2>parameters[3] states</h2>
