@@ -1,7 +1,6 @@
 const { FishingState } = require("./enums/FishingState");
 const { FishingActions } = require("./fishing-actions");
 const { FishBuffs } = require("./enums/FishBuffs")
-const { getReelAction } = require("./pixels");
 const { sleep } = require("./utils");
 const { Items } = require("./enums/Items");
 const { ProcessQueue } = require("./process-queue");
@@ -143,43 +142,24 @@ class FishingHandler {
         this.reelError = false
         this.windowInstance.setForeground()
         FishingActions.hook(this.throwPoint[0], this.throwPoint[1])
-
-        let missedScans = 0
-        let clicks = 1
-
-        this.loopInterval = setInterval(() => {
-            if (this.reelToken !== token) return
-            try {
-                const seen = getReelAction()
-                if (!seen?.bar) {
-                    missedScans += 1
-                    if (missedScans % 12 === 0 && clicks < 4) {
-                        clicks += 1
-                        console.log('Reel bar is not open. Clicking again.')
-                        this.windowInstance.setForeground()
-                        FishingActions.hook(this.throwPoint[0], this.throwPoint[1])
-                    }
-                    return
-                }
-                if (!this.sawBar) {
-                    this.sawBar = true
-                    console.log('Green zone is on screen.')
-                }
-                switch (seen.action) {
-                    case 'pull':
-                        return FishingActions.pull(this.throwPoint[0], this.throwPoint[1])
-                    case 'rest':
-                        return FishingActions.rest(this.throwPoint[0], this.throwPoint[1])
-                    default:
-                        break;
-                }
-            } catch (error) {
-                if (this.reelError) return
-                this.reelError = true
-                console.log('Reel scan failed:', error.message)
-            }
-        }, 50)
+        await this.playReel(token)
         this.autoRestart.reboundTimeout()
+    }
+
+    async playReel(token) {
+        const stillGoing = () => this.reelToken === token && this.reeling && this.isEnabled
+        const between = (min, max) => min + Math.floor(Math.random() * (max - min + 1))
+
+        await sleep(between(70, 150))
+        while (stillGoing()) {
+            FishingActions.pull(this.throwPoint[0], this.throwPoint[1])
+            await sleep(between(480, 1040))
+            if (!stillGoing()) return
+
+            FishingActions.rest(this.throwPoint[0], this.throwPoint[1])
+            const restMs = Math.random() < 0.35 ? between(190, 460) : between(100, 175)
+            await sleep(restMs)
+        }
     }
 
     stopPulling(firedByUser = false) {
