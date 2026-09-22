@@ -7,10 +7,19 @@ class PhotonPacketParser extends EventEmitter {
 	}
 
 	handle(buff) {
-		try {
-			this.emit('packet', new PhotonPacket(this, buff));
-		} catch {
-			return
+		const buffer = Buffer.isBuffer(buff) ? buff : Buffer.from(buff)
+		let offset = 0
+
+		while (offset + 12 <= buffer.length) {
+			let consumed = 0
+			try {
+				const packet = new PhotonPacket(this, buffer.subarray(offset))
+				consumed = packet.consumed || 0
+			} catch {
+				return
+			}
+			if (consumed < 12) return
+			offset += consumed
 		}
 	}
 }

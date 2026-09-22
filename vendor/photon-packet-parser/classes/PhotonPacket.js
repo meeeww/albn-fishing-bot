@@ -27,7 +27,10 @@ class PhotonPacket {
         const commandCount = reader.readUInt8()
         reader.skip(8)
 
-        if (flags === 1) return
+        if (flags === 1) {
+            this.consumed = buffer.length
+            return
+        }
         if (flags === 0xCC) reader.skip(4)
         if (commandCount > 128) return
 
@@ -46,6 +49,8 @@ class PhotonPacket {
             const body = reader.readBytes(bodyLength)
             this.handleCommand(commandType, body)
         }
+
+        this.consumed = reader.offset
     }
 
     handleCommand(commandType, body) {

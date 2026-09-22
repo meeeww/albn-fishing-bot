@@ -15,13 +15,24 @@ const initListener = () => {
         process.exit(1)
     }
 
+    let sawPacket = false
     startCapture(device.name, FILTER, (payload) => {
+        if (!sawPacket) {
+            sawPacket = true
+            console.log('Game traffic detected.')
+        }
         try {
             listener.handle(payload)
         } catch {
             return
         }
     })
+
+    setTimeout(() => {
+        if (!sawPacket) {
+            console.log('No game packets yet. Stay logged into Albion on this adapter.')
+        }
+    }, 3000)
 
     return listener
 }
@@ -57,6 +68,7 @@ const getAdapterIp = () => {
 
     console.log()
     console.log(`you have selected "${selectedName}"`)
+    console.log('Listening. Cast the line; the bot starts when the bait hits the water.')
     console.log()
 
     return selectedIp
