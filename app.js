@@ -3,6 +3,7 @@ const { initListener } = require('./src/event-listener')
 const { FishingEvents } = require('./src/enums/FishingEvents')
 const { FishingHandler } = require('./src/fishing-handler')
 const { getTargetCoordinates, getCurMouseCoor } = require('./src/dimensions')
+const { startInspector, recordMessage, recordBot } = require('./src/inspector')
 
 const win = Window.getByTitle('Albion Online Client')
 
@@ -18,6 +19,7 @@ const {
     fishBaitCoor,
 } = getTargetCoordinates(win)
 
+startInspector()
 const listener = initListener();
 const fishingHandler = new FishingHandler(
     pullPoint,
@@ -26,8 +28,10 @@ const fishingHandler = new FishingHandler(
     fishBaitCoor,
     win,
 );
+fishingHandler.onNote = recordBot
 
 listener.on('event', async (res) => {
+    recordMessage('event', res)
     if (!fishingHandler.isEnabled) return;
 
     const parameters = res['parameters']
@@ -43,10 +47,10 @@ listener.on('event', async (res) => {
             await fishingHandler.startPulling(playerId, parameters);
             break;
         case FishingEvents.FishingFinished:
-            await fishingHandler.restart(playerId);
+            await fishingHandler.restart(playerId, 'event 354 FishingFinished');
             break;
         case FishingEvents.FishingCancel:
-            await fishingHandler.restart(playerId);
+            await fishingHandler.restart(playerId, 'event 355 FishingCancel');
             break;
         case FishingEvents.CharacterEquipmentChanged:
             fishingHandler.addToQueue(fishingHandler.equipBuff, playerId, parameters);
@@ -60,6 +64,7 @@ listener.on('event', async (res) => {
 })
 
 listener.on('request', async (req) => {
+    recordMessage('request', req)
     const requestId = req?.['parameters']?.[253]
     switch (requestId) {
         // bait touch water -> enable program

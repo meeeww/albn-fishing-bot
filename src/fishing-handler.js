@@ -58,6 +58,7 @@ class FishingHandler {
         if (isEnabled) {
             // The cast that just hit the water is already out. Wait for the bite.
             this.phase = 'in-water'
+            this.landedAt = Date.now()
             console.log('Waiting for a bite.')
             this.autoRestart.turnOn()
         } else {
@@ -100,7 +101,7 @@ class FishingHandler {
             case FishingState.LOST:
             case FishingState.WIN:
             case FishingState.CANCEL:
-                this.restart(this.playerId);
+                this.restart(this.playerId, `state ${fishingState} in parameters[3]`);
                 break;
             default:
                 break;
@@ -115,7 +116,7 @@ class FishingHandler {
         if (isIgnored) {
             await sleep(200)
             this.cancel()
-            await this.restart(playerId)
+            await this.restart(playerId, 'ignored fish')
             return;
         }
 
@@ -150,6 +151,7 @@ class FishingHandler {
         await FishingActions.throwBait(this.throwPoint[0], this.throwPoint[1])
         if (!this.isEnabled) return;
         this.phase = 'in-water'
+        this.landedAt = Date.now()
         console.log('Waiting for a bite.')
         this.autoRestart.reboundTimeout()
     }
@@ -171,17 +173,27 @@ class FishingHandler {
         await this.castOnce()
     }
 
-    restart = async (playerId) => {
+    restart = async (playerId, reason = 'unspecified') => {
         if (!this.isEnabled) return;
         if (this.playerId && playerId !== this.playerId) return;
         if (this.restarting) return;
         if (this.phase === 'cooldown' || this.phase === 'casting') return;
 
+        const age = Date.now() - (this.landedAt || 0)
+        if (this.phase === 'in-water' && age < 3000) {
+            const text = `Ignored an early finish ${age}ms after the cast (${reason}). Still waiting for a bite.`
+            console.log(text)
+            this.onNote?.(text)
+            return
+        }
+
         this.restarting = true
         this.phase = 'cooldown'
         try {
             this.stopPulling()
-            console.log('Round finished. Next cast in a moment.')
+            const text = `Round finished (${reason}). Next cast in a moment.`
+            console.log(text)
+            this.onNote?.(text)
             await sleep(4000)
             if (!this.isEnabled) return;
             await this.processQueue.executeAllSequential()
@@ -244,7 +256,7 @@ class FishingHandler {
             this.stopPulling();
             FishingActions.consumeBait();
             await sleep(1000);
-            this.restart(playerId)
+            this.restart(playerId, 'bait buff missing')
         }
 
         if (!seaweedBuffActive) {

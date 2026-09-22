@@ -77,13 +77,18 @@ class PhotonPacket {
         if (messageType > 128) return
 
         const payload = new Reader(body.subarray(2))
+        const raw = Buffer.from(body.subarray(0, Math.min(body.length, 384)))
         if (messageType === 2) {
-            this.parent.emit('request', deserializeOperationRequest(payload))
+            const message = deserializeOperationRequest(payload)
+            message.raw = raw
+            this.parent.emit('request', message)
             return
         }
 
         if (messageType === 4) {
-            this.parent.emit('event', deserializeEventData(payload))
+            const message = deserializeEventData(payload)
+            message.raw = raw
+            this.parent.emit('event', message)
         }
     }
 
