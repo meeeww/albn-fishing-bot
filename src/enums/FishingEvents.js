@@ -5,6 +5,7 @@ const FishingEvents = {
     FishingState: 355,
     FloatUpdate: 360,
     MiniGame: 361,
+    MiniGameSync: 362,
 }
 
 module.exports = {

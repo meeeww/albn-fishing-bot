@@ -43,6 +43,10 @@ listener.on('event', async (res) => {
         case FishingEvents.FishingState:
             await fishingHandler.updateState(parameters);
             break;
+        case FishingEvents.MiniGame:
+        case FishingEvents.MiniGameSync:
+            fishingHandler.noteMinigame(eventCode, parameters);
+            break;
         case FishingEvents.CharacterEquipmentChanged:
             fishingHandler.addToQueue(fishingHandler.equipBuff, playerId, parameters);
             break;

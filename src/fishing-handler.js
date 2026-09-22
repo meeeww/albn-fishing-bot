@@ -140,25 +140,55 @@ class FishingHandler {
         this.reeling = true
         this.sawBar = false
         this.reelError = false
+        this.reelPace = 1
+        this.reelBumps = {}
         this.windowInstance.setForeground()
         FishingActions.hook(this.throwPoint[0], this.throwPoint[1])
         await this.playReel(token)
         this.autoRestart.reboundTimeout()
     }
 
+    noteMinigame(eventCode, parameters) {
+        if (this.phase !== 'minigame') return
+        const mark = Number(parameters?.[3])
+        const harder = eventCode === 362 ? mark >= 1.4 : mark >= 3
+        if (!harder) return
+        const key = eventCode === 362 ? 'sync' : 'game'
+        if (this.reelBumps[key]) return
+        this.reelBumps[key] = true
+        this.reelPace = Math.min(3, (this.reelPace || 1) + 1)
+        console.log(`Fish pulling away. Shorter releases (${this.reelPace}).`)
+    }
+
+    reelAlive(token) {
+        return this.reelToken === token && this.reeling && this.isEnabled && this.phase === 'minigame'
+    }
+
     async playReel(token) {
-        const stillGoing = () => this.reelToken === token && this.reeling && this.isEnabled
         const between = (min, max) => min + Math.floor(Math.random() * (max - min + 1))
+        const pause = async (ms, cutShortOnPace) => {
+            const paceAtStart = this.reelPace || 1
+            let left = ms
+            while (left > 0) {
+                if (!this.reelAlive(token)) return false
+                if (cutShortOnPace && (this.reelPace || 1) > paceAtStart) return true
+                const slice = Math.min(30, left)
+                await sleep(slice)
+                left -= slice
+            }
+            return true
+        }
 
-        await sleep(between(70, 150))
-        while (stillGoing()) {
+        await pause(between(40, 90), false)
+        while (this.reelAlive(token)) {
+            const pace = this.reelPace || 1
+            const hold = pace >= 3 ? between(320, 540) : pace >= 2 ? between(400, 700) : between(540, 960)
+            const rest = pace >= 3 ? between(35, 70) : pace >= 2 ? between(50, 95) : between(85, 145)
+
             FishingActions.pull(this.throwPoint[0], this.throwPoint[1])
-            await sleep(between(480, 1040))
-            if (!stillGoing()) return
-
+            if (!await pause(hold, false)) return
             FishingActions.rest(this.throwPoint[0], this.throwPoint[1])
-            const restMs = Math.random() < 0.35 ? between(190, 460) : between(100, 175)
-            await sleep(restMs)
+            if (!await pause(rest, true)) return
         }
     }
 
