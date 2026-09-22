@@ -13,8 +13,8 @@ the fishing event packets, reading pixel changes and sending mouse events. No in
 ![preview](showcase/preview.gif)
 
 this bot would not be possible without incredible packages:
-- [cap](https://github.com/mscdex/cap)
+- [Npcap](https://npcap.com/)
 - [photon-packet-parser](https://github.com/0xN0x/photon-packet-parser)
 - [robotjs](https://github.com/octalmage/robotjs)
-- [win-control](https://github.com/nosolosoftware/win-control)
+- [koffi](https://koffi.dev/)
 - [color-classifier](https://github.com/wadackel/color-classifier)

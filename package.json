@@ -5,11 +5,10 @@
   },
   "dependencies": {
     "buffercursor": "^0.0.12",
-    "cap": "^0.2.1",
     "color-classifier": "^0.0.1",
     "readline-sync": "^1.4.10",
-    "robotjs": "^0.6.0",
-    "win-control": "^0.3.1"
+    "koffi": "^3.3.1",
+    "robotjs": "0.9.1"
   },
   "devDependencies": {
     "@types/node": "^20.11.30"

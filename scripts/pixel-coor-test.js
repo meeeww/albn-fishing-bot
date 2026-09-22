@@ -1,4 +1,4 @@
-const { Window } = require('win-control')
+const { Window } = require('../src/window')
 const { getTargetCoordinates } = require('../src/dimensions')
 const robot = require('robotjs')
 

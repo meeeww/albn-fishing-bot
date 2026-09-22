@@ -1,4 +1,4 @@
-const { Window } = require('win-control')
+const { Window } = require('./src/window')
 const { initListener } = require('./src/event-listener')
 const { FishingEvents } = require('./src/enums/FishingEvents')
 const { FishingHandler } = require('./src/fishing-handler')

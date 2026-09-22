@@ -1,34 +1,23 @@
 const PhotonParser = require('../vendor/photon-packet-parser');
-const Cap = require('cap').Cap;
-const decoders = require('cap').decoders;
+const { deviceForIp, startCapture } = require('./capture')
 const { networkInterfaces } = require('os')
 const readlineSync = require('readline-sync');
 
+const FILTER = 'udp and (dst port 5056 or src port 5056)';
 
 const initListener = () => {
     const listener = new PhotonParser();
-    const capture = new Cap();
     const adapterIp = getAdapterIp()
-    const device = Cap.findDevice(adapterIp);
-    const filter = 'udp and (dst port 5056 or src port 5056)';
-    // const bufSize = 10 * 1024 * 1024;
-    // const buffer = Buffer.alloc(65535);
-    const bufSize = 4096;
-    const buffer = Buffer.alloc(4096);
-    const linkType = capture.open(device, filter, bufSize, buffer);
+    const device = deviceForIp(adapterIp)
 
-    capture.setMinBytes && capture.setMinBytes(0);
+    if (!device) {
+        console.log(`No capture device found for ${adapterIp}. Install Npcap, then run this again.`)
+        process.exit(1)
+    }
 
-    capture.on('packet', (nbytes, trunc) => {
-        let ret = decoders.Ethernet(buffer);
-        ret = decoders.IPV4(buffer, ret.offset);
-        ret = decoders.UDP(buffer, ret.offset);
-    
-        let payload = buffer.slice(ret.offset, nbytes);
-    
-        // Parse the UDP payload
-        listener.handle(payload);
-    });
+    startCapture(device.name, FILTER, (payload) => {
+        listener.handle(payload)
+    })
 
     return listener
 }
