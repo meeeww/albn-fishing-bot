@@ -16,7 +16,11 @@ const initListener = () => {
     }
 
     startCapture(device.name, FILTER, (payload) => {
-        listener.handle(payload)
+        try {
+            listener.handle(payload)
+        } catch {
+            return
+        }
     })
 
     return listener

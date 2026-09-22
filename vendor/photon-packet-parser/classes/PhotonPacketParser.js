@@ -7,7 +7,11 @@ class PhotonPacketParser extends EventEmitter {
 	}
 
 	handle(buff) {
-		this.emit('packet', new PhotonPacket(this, buff));
+		try {
+			this.emit('packet', new PhotonPacket(this, buff));
+		} catch {
+			return
+		}
 	}
 }
 

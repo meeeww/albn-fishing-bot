@@ -1,45 +1,120 @@
-const BufferCursor = require('buffercursor');
-const PhotonCommand = require('./PhotonCommand.js');
+const {
+    Reader,
+    ShortRead,
+    deserializeEventData,
+    deserializeOperationRequest,
+} = require('./Protocol18Deserializer')
 
+const HEADER_LENGTH = 12
+const FRAGMENT_HEADER_LENGTH = 20
 
 class PhotonPacket {
-	constructor(parent, buff) {
-		this.parent = parent;
-		this.emit = parent.emit;
-		this.payload = new BufferCursor(buff);
-		this.peerId = 0;
-		this.flags = 0;
-		this.commandCount = 0;
-		this.timestmap = 0;
-		this.challenge = 0;
-		this.commands = [];
+    constructor(parent, buffer) {
+        this.parent = parent
+        try {
+            this.parse(Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer))
+        } catch (error) {
+            if (!(error instanceof ShortRead)) throw error
+        }
+    }
 
-		this.parsePacket();
-	}
+    parse(buffer) {
+        const reader = new Reader(buffer)
+        if (reader.remaining() < HEADER_LENGTH) return
 
-	/**
-	 * Parse the header of the photon packet (12 bytes)
-	 * - peer id (2 byte)
-	 * - flags (1 byte)
-	 * - commands count (1 byte)
-	 * - timestamp (4 byte)
-	 * - challenge (4 byte)
-	 */
-	parsePhotonHeader() {
-		this.peerId = this.payload.readUInt16BE();
-		this.flags = this.payload.readUInt8();
-		this.commandCount = this.payload.readUInt8();
-		this.timestamp = this.payload.readUInt32BE();
-		this.challenge = this.payload.readUInt32BE();
-	}
+        reader.skip(2)
+        const flags = reader.readUInt8()
+        const commandCount = reader.readUInt8()
+        reader.skip(8)
 
-	parsePacket() {
-		this.parsePhotonHeader();
+        if (flags === 1) return
+        if (flags === 0xCC) reader.skip(4)
+        if (commandCount > 128) return
 
-		for (let i = 0; i < this.commandCount; i++) {
-			this.commands.push(new PhotonCommand(this, this.payload));
-		}
-	}
+        for (let i = 0; i < commandCount; i++) {
+            if (reader.remaining() < HEADER_LENGTH) return
+
+            const commandType = reader.readUInt8()
+            reader.skip(3)
+            const commandLength = reader.readUInt32BE()
+            reader.skip(4)
+
+            if (commandLength < HEADER_LENGTH) return
+            const bodyLength = commandLength - HEADER_LENGTH
+            if (reader.remaining() < bodyLength) return
+
+            const body = reader.readBytes(bodyLength)
+            this.handleCommand(commandType, body)
+        }
+    }
+
+    handleCommand(commandType, body) {
+        if (commandType === 7) {
+            if (body.length < 4) return
+            this.handleReliable(body.subarray(4))
+            return
+        }
+
+        if (commandType === 6) {
+            this.handleReliable(body)
+            return
+        }
+
+        if (commandType === 8) {
+            this.handleFragment(body)
+        }
+    }
+
+    handleReliable(body) {
+        if (body.length < 2) return
+
+        const messageType = body[1]
+        if (messageType > 128) return
+
+        const payload = new Reader(body.subarray(2))
+        if (messageType === 2) {
+            this.parent.emit('request', deserializeOperationRequest(payload))
+            return
+        }
+
+        if (messageType === 4) {
+            this.parent.emit('event', deserializeEventData(payload))
+        }
+    }
+
+    handleFragment(body) {
+        if (body.length < FRAGMENT_HEADER_LENGTH) return
+
+        const reader = new Reader(body)
+        const startSequence = reader.readInt32BE()
+        reader.skip(8)
+        const totalLength = reader.readInt32BE()
+        const fragmentOffset = reader.readUInt32BE()
+        const fragment = reader.readBytes(reader.remaining())
+
+        if (totalLength <= 0 || totalLength > 10 * 1024 * 1024) return
+        if (fragmentOffset + fragment.length > totalLength) return
+
+        if (!this.parent.fragments) this.parent.fragments = new Map()
+
+        let pending = this.parent.fragments.get(startSequence)
+        if (!pending) {
+            pending = {
+                totalLength,
+                written: 0,
+                payload: Buffer.alloc(totalLength),
+            }
+            this.parent.fragments.set(startSequence, pending)
+        }
+
+        fragment.copy(pending.payload, fragmentOffset)
+        pending.written += fragment.length
+
+        if (pending.written >= pending.totalLength) {
+            this.parent.fragments.delete(startSequence)
+            this.handleReliable(pending.payload)
+        }
+    }
 }
 
-module.exports = PhotonPacket;
+module.exports = PhotonPacket
