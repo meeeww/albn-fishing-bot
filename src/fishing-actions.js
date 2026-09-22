@@ -1,26 +1,21 @@
 const robot = require('robotjs');
 const { sleep } = require('./utils');
 
-let throwChargeTime = 50;
-let isPulling = false; // Track pull state to avoid spamming OS inputs
+// Long enough for the bobber to leave the rod. A tap (50ms) never reaches the water.
+const CAST_HOLD_MS = 800
+let isPulling = false
 
 class FishingActions {
     static async throwBait(x, y) {
-        // const minChargeTime = 150
-        // const maxChargeTime = 900
-        // const chargeTime = Math.floor(Math.random() * (maxChargeTime - minChargeTime + 1) + minChargeTime)
-        const chargeTime = throwChargeTime
-        console.log('action: throwBait - ', chargeTime)
+        console.log('action: throwBait')
+        if (isPulling) {
+            robot.mouseToggle("up")
+            isPulling = false
+        }
         robot.moveMouse(x, y);
         robot.mouseToggle("down");
-        await sleep(chargeTime)
+        await sleep(CAST_HOLD_MS)
         robot.mouseToggle("up")
-
-        if (chargeTime > 1000) {
-            throwChargeTime = 50
-        } else {
-            throwChargeTime += 150
-        }
     }
 
     static pull(x, y) {

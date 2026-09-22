@@ -12,14 +12,19 @@ class AutoRestart {
     }
 
     turnOn = () => {
+        this.armed = true
         clearTimeout(this.id)
-        this.id = setTimeout(() => {
-            this.actionOnTimeout()
-            this.turnOn()
-        }, this.timeoutTime)
+        this.id = setTimeout(() => this.fire(), this.timeoutTime)
+    }
+
+    fire = () => {
+        Promise.resolve(this.actionOnTimeout()).finally(() => {
+            if (this.armed) this.turnOn()
+        })
     }
 
     turnOff = () => {
+        this.armed = false
         clearTimeout(this.id)
         this.id = 0
     }

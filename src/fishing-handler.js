@@ -2,7 +2,7 @@ const { FishingState } = require("./enums/FishingState");
 const { FishingActions } = require("./fishing-actions");
 const { FishBuffs } = require("./enums/FishBuffs")
 const { getActionFromCoordinates: getAction } = require("./pixels");
-const { sleep, throttle } = require("./utils");
+const { sleep } = require("./utils");
 const { Items } = require("./enums/Items");
 const { ProcessQueue } = require("./process-queue");
 const { checkIsIgnored } = require("./enums/IgnoredFishes");
@@ -44,18 +44,24 @@ class FishingHandler {
 
         this.consumeBuff = this.consumeBuff.bind(this)
         this.equipBuff = this.equipBuff.bind(this)
-        this.start = this.start.bind(this)
 
         this.processQueue = new ProcessQueue()
-        this.autoRestart = new AutoRestart(this.start, 15000)
+        // Only used when a cast is stuck. A live line must not be clicked again.
+        this.autoRestart = new AutoRestart(() => this.recover(), 60000)
+        this.phase = 'idle'
+        this.restarting = false
     }
 
     setEnabled(isEnabled) {
         this.isEnabled = isEnabled
 
         if (isEnabled) {
+            // The cast that just hit the water is already out. Wait for the bite.
+            this.phase = 'in-water'
+            console.log('Waiting for a bite.')
             this.autoRestart.turnOn()
         } else {
+            this.phase = 'idle'
             this.autoRestart.turnOff()
         }
     }
@@ -81,14 +87,21 @@ class FishingHandler {
         }
 
         switch (fishingState) {
+            case FishingState.THROW:
+            case FishingState.TOUCH_WATER:
+                this.phase = 'in-water'
+                break;
             case FishingState.HOOKED:
-                await sleep(100);
-                FishingActions.pull(this.throwPoint[0], this.throwPoint[1]);
+            case FishingState.PULL:
+            case FishingState.REST:
+                this.phase = 'minigame'
                 break;
             case FishingState.GET_AWAY:
             case FishingState.LOST:
             case FishingState.WIN:
+            case FishingState.CANCEL:
                 this.restart(this.playerId);
+                break;
             default:
                 break;
         }
@@ -106,6 +119,7 @@ class FishingHandler {
             return;
         }
 
+        this.phase = 'minigame'
         this.loopInterval = setInterval(() => {
             const action = getAction(this.pullPoint, this.restPoint)
 
@@ -127,22 +141,56 @@ class FishingHandler {
         FishingActions.rest(this.throwPoint[0], this.throwPoint[1])
     }
 
-    async start() {
+    async castOnce() {
         if (!this.isEnabled) return;
+        if (this.phase === 'casting' || this.phase === 'in-water' || this.phase === 'minigame') return;
+
+        this.phase = 'casting'
         this.windowInstance.setForeground();
-        FishingActions.throwBait(this.throwPoint[0], this.throwPoint[1])
+        await FishingActions.throwBait(this.throwPoint[0], this.throwPoint[1])
+        if (!this.isEnabled) return;
+        this.phase = 'in-water'
+        console.log('Waiting for a bite.')
+        this.autoRestart.reboundTimeout()
     }
 
-    restart = throttle(async (playerId) => {
-        if (playerId !== this.playerId) return;
+    async recover() {
         if (!this.isEnabled) return;
+        if (this.phase === 'casting' || this.phase === 'minigame' || this.phase === 'cooldown') return;
 
-        this.stopPulling()
-        await sleep(2000)
-        await this.processQueue.executeAllSequential()
-        await this.start()
-        this.autoRestart.reboundTimeout()
-    }, 1500)
+        if (this.phase === 'in-water') {
+            console.log('No bite. Cancelling the line, then recasting.')
+            this.stopPulling()
+            FishingActions.cancel()
+            this.phase = 'cooldown'
+            await sleep(2500)
+            if (!this.isEnabled) return;
+            this.phase = 'idle'
+        }
+
+        await this.castOnce()
+    }
+
+    restart = async (playerId) => {
+        if (!this.isEnabled) return;
+        if (this.playerId && playerId !== this.playerId) return;
+        if (this.restarting) return;
+        if (this.phase === 'cooldown' || this.phase === 'casting') return;
+
+        this.restarting = true
+        this.phase = 'cooldown'
+        try {
+            this.stopPulling()
+            console.log('Round finished. Next cast in a moment.')
+            await sleep(4000)
+            if (!this.isEnabled) return;
+            await this.processQueue.executeAllSequential()
+            this.phase = 'idle'
+            await this.castOnce()
+        } finally {
+            this.restarting = false
+        }
+    }
 
     cancel() {
         FishingActions.cancel()
@@ -192,11 +240,11 @@ class FishingHandler {
         const seaweedBuffActive = activeBuffs.includes(FishBuffs.SeaweedSalad);
         // const seaweedEquiped = this.foodSlotItemId === Items.T1_MEAL_SEAWEEDSALAD;
 
-        if (!baitBuffActive) {
+        if (!baitBuffActive && this.phase !== 'in-water' && this.phase !== 'minigame' && this.phase !== 'casting') {
             this.stopPulling();
             FishingActions.consumeBait();
             await sleep(1000);
-            this.restart()
+            this.restart(playerId)
         }
 
         if (!seaweedBuffActive) {
